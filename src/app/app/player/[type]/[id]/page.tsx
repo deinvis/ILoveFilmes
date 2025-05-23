@@ -7,8 +7,15 @@ import { usePlaylistStore } from '@/store/playlistStore';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import type { MediaItem } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Film, Tv2, Clapperboard } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+const MEDIA_TYPE_ICONS = {
+  channel: Tv2,
+  movie: Film,
+  series: Clapperboard,
+};
 
 export default function PlayerPage() {
   const params = useParams();
@@ -21,11 +28,11 @@ export default function PlayerPage() {
     setIsClient(true);
   }, []);
 
+  const itemType = (Array.isArray(params.type) ? params.type[0] : params.type) as MediaItem['type'];
   const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
   
   useEffect(() => {
     if (isClient) {
-      // Ensure playlists are loaded if not already
       if (mediaItems.length === 0 && !isLoading) {
         fetchAndParsePlaylists();
       }
@@ -39,24 +46,35 @@ export default function PlayerPage() {
       const foundItem = mediaItems.find(item => item.id === decodeURIComponent(itemId));
       setItemToPlay(foundItem || null);
     } else if (!isLoading) {
-      // If not loading and no media items, it implies it might not be found or playlists are empty
        setItemToPlay(null);
     }
   }, [isClient, itemId, mediaItems, isLoading]);
 
+  const PageIcon = itemType ? MEDIA_TYPE_ICONS[itemType] : Film;
+
   if (!isClient || itemToPlay === undefined || (isLoading && mediaItems.length === 0 && itemToPlay === undefined)) {
     return (
-      <div className="max-w-4xl mx-auto">
-        <Skeleton className="h-10 w-32 mb-6" /> {/* Back button placeholder */}
-        <Skeleton className="h-12 w-3/4 mb-1" /> {/* Title placeholder */}
-        <Skeleton className="h-6 w-1/2 mb-4" /> {/* Group/Genre placeholder */}
-        <Skeleton className="w-full aspect-video rounded-lg shadow-2xl" /> {/* Video player placeholder */}
-        <div className="mt-6 p-4 border rounded-lg bg-card"> {/* Description card placeholder */}
-          <Skeleton className="h-8 w-1/3 mb-2" /> {/* Description title placeholder */}
-          <Skeleton className="h-5 w-full mb-1" />
-          <Skeleton className="h-5 w-full mb-1" />
-          <Skeleton className="h-5 w-3/4" />
-        </div>
+      <div className="max-w-4xl mx-auto p-4 space-y-6">
+        <Skeleton className="h-10 w-36 mb-2" /> {/* Back button placeholder */}
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-8 w-3/4 mb-2" /> {/* Title placeholder */}
+            <Skeleton className="h-5 w-1/2" /> {/* Group/Genre placeholder */}
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="w-full aspect-video rounded-lg" /> {/* Video player placeholder */}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-7 w-1/3 mb-2" /> {/* Description title placeholder */}
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -77,22 +95,41 @@ export default function PlayerPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <Button variant="outline" onClick={() => router.back()} className="mb-6">
+    <div className="max-w-5xl mx-auto p-4 space-y-6">
+      <Button variant="outline" onClick={() => router.back()} className="mb-2">
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to {itemToPlay.type}s
       </Button>
-      <h1 className="text-3xl font-bold mb-2">{itemToPlay.title}</h1>
-      {itemToPlay.groupTitle && <p className="text-sm text-muted-foreground mb-1">From: {itemToPlay.groupTitle}</p>}
-      {itemToPlay.genre && <p className="text-sm text-muted-foreground mb-4">Genre: {itemToPlay.genre}</p>}
       
-      <VideoPlayer item={itemToPlay} />
+      <Card className="overflow-hidden shadow-xl">
+        <CardHeader>
+          <CardTitle className="text-3xl font-bold flex items-center">
+            <PageIcon className="mr-3 h-8 w-8 text-primary" />
+            {itemToPlay.title}
+          </CardTitle>
+          {(itemToPlay.groupTitle || itemToPlay.genre) && (
+            <CardDescription className="text-md mt-1">
+              {itemToPlay.groupTitle && `From: ${itemToPlay.groupTitle}`}
+              {itemToPlay.groupTitle && itemToPlay.genre && " | "}
+              {itemToPlay.genre && `Genre: ${itemToPlay.genre}`}
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent>
+          <VideoPlayer item={itemToPlay} />
+        </CardContent>
+      </Card>
       
       {itemToPlay.description && (
-        <div className="mt-6 p-4 border rounded-lg bg-card">
-          <h2 className="text-xl font-semibold mb-2">Description</h2>
-          <p className="text-muted-foreground">{itemToPlay.description}</p>
-        </div>
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-2xl">Description</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground whitespace-pre-wrap">{itemToPlay.description}</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
 }
+
