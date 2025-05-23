@@ -3,7 +3,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
-import type { PlaylistItem, MediaItem, EpgProgram } from '@/types';
+import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath } from '@/types';
 import { parseM3U } from '@/lib/m3u-parser';
 import { parseXMLTV } from '@/lib/xmltv-parser';
 
@@ -22,6 +22,9 @@ interface PlaylistState {
   epgError: string | null;
   setEpgUrl: (url: string | null) => Promise<void>;
   fetchAndParseEpg: (forceRefresh?: boolean) => Promise<void>;
+
+  preferredStartPage: StartPagePath;
+  setPreferredStartPage: (path: StartPagePath) => void;
 }
 
 const getLocalStorage = () => {
@@ -37,7 +40,7 @@ const getLocalStorage = () => {
 };
 
 // Define what parts of the state to persist
-type PersistentPlaylistState = Pick<PlaylistState, 'playlists' | 'epgUrl'>;
+type PersistentPlaylistState = Pick<PlaylistState, 'playlists' | 'epgUrl' | 'preferredStartPage'>;
 
 
 const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
@@ -46,7 +49,9 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
   partialize: (state) => ({
     playlists: state.playlists,
     epgUrl: state.epgUrl,
+    preferredStartPage: state.preferredStartPage,
     // mediaItems and epgData are not persisted to avoid localStorage quota issues
+    // and to ensure they are fetched fresh on app start or when sources change.
   }),
    onRehydrateStorage: (state) => {
     console.log("Hydration starts");
@@ -57,10 +62,8 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
         console.log("Successfully rehydrated state:", rehydratedState);
          if (rehydratedState) {
           // Trigger initial fetches after rehydration if necessary
-          // Note: fetchAndParsePlaylists might be called by components too
-          // This ensures EPG is fetched if URL was persisted
           if (rehydratedState.epgUrl) {
-             Promise.resolve().then(() => { // Ensure it runs after current event loop
+             Promise.resolve().then(() => { 
                 usePlaylistStore.getState().fetchAndParseEpg();
              });
           }
@@ -83,11 +86,14 @@ export const usePlaylistStore = create<PlaylistState>()(
       epgLoading: false,
       epgError: null,
 
+      preferredStartPage: '/app/channels', // Default start page
+      setPreferredStartPage: (path: StartPagePath) => {
+        set({ preferredStartPage: path });
+      },
+
       addPlaylist: async (url: string) => {
         if (get().playlists.some(p => p.url === url)) {
           set({ error: "Playlist URL already exists." });
-          // Consider not returning here and letting fetchAndParsePlaylists handle error display
-          // For now, this provides immediate feedback.
           return;
         }
         try {
@@ -110,15 +116,12 @@ export const usePlaylistStore = create<PlaylistState>()(
       removePlaylist: (id: string) => {
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
-          // Also clear media items that originated from this playlist
-          mediaItems: state.mediaItems.filter(item => !item.id.startsWith(id)) 
+          mediaItems: [] // Clear mediaItems to force re-fetch from remaining playlists
         }));
-        // No need to force refresh if we manually cleared relevant mediaItems
-        // However, a full refresh ensures consistency if other logic depends on it.
-        // For simplicity and to ensure all related data is re-evaluated:
         get().fetchAndParsePlaylists(true); 
       },
       fetchAndParsePlaylists: async (forceRefresh = false) => {
+        // If not forcing refresh, and we have media items, and not currently loading, use cached items in memory.
         if (!forceRefresh && get().mediaItems.length > 0 && !get().isLoading) {
           console.log("Using in-session media items.");
           return;
@@ -203,7 +206,6 @@ export const usePlaylistStore = create<PlaylistState>()(
                     const textError = await response.text();
                     proxyErrorDetails = textError || proxyErrorDetails;
                 } catch (textReadError) {
-                    // if response.text() also fails
                     proxyErrorDetails = 'Proxy did not return a JSON response, and its body was unreadable as text.';
                 }
             }
@@ -212,15 +214,17 @@ export const usePlaylistStore = create<PlaylistState>()(
           }
           
           const xmlString = await response.text();
-          // Basic check: does it look like XML?
-          if (!xmlString.trim().startsWith('<')) { 
-             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML (does not start with '<'). Please check the EPG URL. Content received: ${xmlString.substring(0,100)}...`;
+          
+          // Basic check: does it look like XML or gzipped XML?
+          // A more robust check might involve trying to parse and catching errors.
+           if (!xmlString.trim().startsWith('<') && !xmlString.trim().startsWith('\x1f\x8b')) { // 1f 8b is gzip magic number
+             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML (does not start with '<') nor gzipped XML. Please check the EPG URL. Content received (first 100 chars): ${xmlString.substring(0,100)}...`;
              console.warn(errorDetail);
              throw new Error(errorDetail);
           }
 
-          const parsedEpgData = parseXMLTV(xmlString);
-          set({ epgData: parsedEpgData, epgLoading: false });
+          const parsedEpgData = parseXMLTV(xmlString); // parseXMLTV should handle potential gzip
+          set({ epgData: parsedEpgData, epgLoading: false, epgError: null });
         } catch (e: any) {
           console.error("Error fetching or parsing EPG data:", e);
           set({ epgLoading: false, epgError: e.message || "An error occurred while processing EPG data." });
@@ -231,12 +235,8 @@ export const usePlaylistStore = create<PlaylistState>()(
   )
 );
 
-// Initial fetch for playlists after store is created and potentially rehydrated
-// This ensures playlists are loaded if the app is opened directly to a page
-// that relies on playlist data.
 if (typeof window !== 'undefined') {
-  Promise.resolve().then(() => { // Ensure it runs after initial hydration attempt
+  Promise.resolve().then(() => { 
     usePlaylistStore.getState().fetchAndParsePlaylists();
-    // EPG fetch is handled by onRehydrateStorage or setEpgUrl
   });
 }

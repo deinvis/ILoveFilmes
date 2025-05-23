@@ -1,5 +1,6 @@
 
 export type MediaType = 'channel' | 'movie' | 'series';
+export type StartPagePath = '/app/channels' | '/app/movies' | '/app/series';
 
 export interface PlaylistItem {
   id: string;
