@@ -11,7 +11,7 @@ interface PlaylistState {
   mediaItems: MediaItem[]; // All media items from all playlists
   addPlaylist: (url: string) => Promise<void>;
   removePlaylist: (id: string) => void;
-  fetchAndParsePlaylists: () => Promise<void>;
+  fetchAndParsePlaylists: (forceRefresh?: boolean) => Promise<void>;
   isLoading: boolean;
   error: string | null;
 }
@@ -29,13 +29,14 @@ const getLocalStorage = () => {
 };
 
 // Define the part of the state to persist
-type PersistentPlaylistState = Pick<PlaylistState, 'playlists'>;
+type PersistentPlaylistState = Pick<PlaylistState, 'playlists' | 'mediaItems'>;
 
 const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
   name: 'streamverse-playlists-storage',
   storage: createJSONStorage(() => getLocalStorage()),
   partialize: (state) => ({
-    playlists: state.playlists, // Only persist the playlists array
+    playlists: state.playlists,
+    mediaItems: state.mediaItems, // Persist mediaItems as well
   }),
 };
 
@@ -49,6 +50,8 @@ export const usePlaylistStore = create<PlaylistState>()(
       addPlaylist: async (url: string) => {
         if (get().playlists.some(p => p.url === url)) {
           set({ error: "Playlist URL already exists." });
+          // Even if it exists, we might want to refresh related media items if user tries to re-add
+          // However, for now, let's keep it simple: if exists, show error and don't re-parse.
           return;
         }
         set({ isLoading: true, error: null }); 
@@ -62,9 +65,8 @@ export const usePlaylistStore = create<PlaylistState>()(
           set((state) => ({
             playlists: [...state.playlists, newPlaylist],
           }));
-          // After adding, fetch and parse all playlists again.
-          // This will also update mediaItems and handle isLoading/error states internally.
-          await get().fetchAndParsePlaylists(); 
+          // After adding, fetch and parse all playlists again, forcing a refresh of mediaItems.
+          await get().fetchAndParsePlaylists(true); 
         } catch (e: any) { 
           console.error("Error in addPlaylist process:", e);
           set({ isLoading: false, error: e.message || "Failed to add playlist." });
@@ -74,16 +76,20 @@ export const usePlaylistStore = create<PlaylistState>()(
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
         }));
-        // After removing, fetch and parse remaining playlists.
-        // This ensures mediaItems are updated.
+        // After removing, fetch and parse remaining playlists, forcing a refresh.
         set({ isLoading: true, error: null }); // Set loading for the re-parse
-        get().fetchAndParsePlaylists();
+        get().fetchAndParsePlaylists(true);
       },
-      fetchAndParsePlaylists: async () => {
-        // Ensure isLoading is true if called, unless it's already true.
-        if (!get().isLoading) { 
-           set({ isLoading: true, error: null });
+      fetchAndParsePlaylists: async (forceRefresh = false) => {
+        const currentMediaItems = get().mediaItems;
+        if (!forceRefresh && currentMediaItems && currentMediaItems.length > 0) {
+          set({ isLoading: false, error: null }); // Ensure loading state is correct when using cache
+          console.log("Using cached media items.");
+          return;
         }
+
+        console.log(forceRefresh ? "Forcing refresh of media items." : "Cache empty or refresh needed, fetching media items.");
+        set({ isLoading: true, error: null });
         
         const currentPlaylists = get().playlists;
         let allMediaItems: MediaItem[] = [];
@@ -111,8 +117,6 @@ export const usePlaylistStore = create<PlaylistState>()(
             }
           });
           
-          // This set call is what was causing the quota error if mediaItems were persisted.
-          // Now, mediaItems is just an in-memory state.
           set({ 
             mediaItems: allMediaItems, 
             isLoading: false, 
@@ -125,6 +129,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         }
       },
     }),
-    persistOptions // Use the defined persistOptions
+    persistOptions
   )
 );
+
