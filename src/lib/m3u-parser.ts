@@ -1,20 +1,17 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 5000; // Limite definido para 5000 itens por playlist
+const MAX_ITEMS_PER_PLAYLIST = 5000;
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 const SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 
-// Keywords for group titles (case-insensitive)
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados'];
 const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes'];
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal'];
 
-// Keywords for item titles (case-insensitive) - used as fallback or refinement
 const TITLE_MOVIE_KEYWORDS = ['movie', 'film', 'pelicula'];
 const TITLE_SERIES_KEYWORDS = ['series', 'serie', 'série', 'tvshow', 'season', 'episode', 'temporada', 'episodio', 'anime'];
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal'];
-
 
 export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
   console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId}, Original URL: ${playlistUrl}. Item limit: ${MAX_ITEMS_PER_PLAYLIST}`);
@@ -103,10 +100,16 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       const attributeRegex = /(\S+?)="([^"]*)"/g;
       let match;
       while ((match = attributeRegex.exec(attributesString)) !== null) {
-        const key = match[1].toLowerCase().replace(/-/g, '');
+        const key = match[1].toLowerCase().replace(/-/g, ''); // e.g., tvg-id -> tvgid
         const value = match[2].trim();
         currentRawItem[key] = value;
       }
+      
+      // Ensure tvg-id is captured as tvgId for EPG linking
+      if (currentRawItem.tvgid && !currentRawItem.tvgId) {
+          currentRawItem.tvgId = currentRawItem.tvgid;
+      }
+
 
       if (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '') {
         currentRawItem.title = currentRawItem.tvgname.trim();
@@ -130,15 +133,15 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         const {
           posterUrl,
           groupTitle,
-          tvgid,
-          tvgchno,
+          tvgId, // Use the correctly cased tvgId
           originatingPlaylistId
         } = currentRawItem;
 
         const finalTitle = currentRawItem.title;
 
         const itemIndexInFile = items.length;
-        let semanticPart = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
+        // Use tvgId in itemId if available, otherwise fallback
+        let semanticPart = tvgId || currentRawItem.tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         let mediaType: MediaType;
@@ -154,33 +157,28 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
             mediaType = 'series';
         } else if (lowerStreamUrl.includes('movies')) {
             mediaType = 'movie';
-        } else if (lowerTitle.includes('ppv')) { // PPV in title
+        } else if (lowerTitle.includes('ppv')) { 
             mediaType = 'channel';
-        // Group title keywords (next priority)
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
         } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'movie';
         } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'series';
-        // VOD stream by extension & specific title patterns (if group title wasn't decisive)
         } else if (isVODStreamByExtension) {
           if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
             mediaType = 'series';
           } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
             mediaType = 'movie';
           } else {
-            // If VOD extension but no strong movie/series indicators, default to movie
             mediaType = 'movie'; 
           }
-        // General title keywords (if not VOD by extension and other checks failed)
         } else if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'series';
         } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'movie';
         } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'channel';
-        // Final Default
         } else {
           mediaType = 'channel';
         }
@@ -189,9 +187,10 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           id: itemId,
           type: mediaType,
           title: finalTitle,
-          posterUrl: posterUrl, // Can be undefined
+          posterUrl: posterUrl,
           streamUrl: streamUrl,
           groupTitle: groupTitle,
+          tvgId: tvgId, // Store tvgId
           genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined,
           description: `Title: ${finalTitle}. Group: ${groupTitle || 'N/A'}. Type: ${mediaType}. Parsed from playlist: ${playlistId}`,
         };
@@ -203,4 +202,3 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
   return items;
 }
-

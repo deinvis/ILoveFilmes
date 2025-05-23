@@ -1,19 +1,21 @@
+
 import Image from 'next/image';
 import Link from 'next/link';
 import type { MediaItem } from '@/types';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PlayCircle } from 'lucide-react';
+import React from 'react';
 
 interface MediaCardProps {
   item: MediaItem;
+  nowPlaying?: string; // Optional: For EPG "Now Playing" info
 }
 
-export function MediaCard({ item }: MediaCardProps) {
+export function MediaCard({ item, nowPlaying }: MediaCardProps) {
   const [imageError, setImageError] = React.useState(false);
   const placeholderBaseUrl = 'https://placehold.co/300x450.png';
   const dataAiHint = item.posterUrl?.split('hint=')[1] || (item.type === 'movie' ? 'movie poster' : item.type === 'series' ? 'tv series' : 'tv broadcast');
-
 
   const posterUrl = imageError || !item.posterUrl ? placeholderBaseUrl : item.posterUrl;
 
@@ -29,6 +31,7 @@ export function MediaCard({ item }: MediaCardProps) {
             className="object-cover w-full h-full"
             onError={() => setImageError(true)}
             data-ai-hint={dataAiHint}
+            priority={false} // Default to false, can be true for above-the-fold critical images
           />
         </Link>
       </CardHeader>
@@ -38,6 +41,9 @@ export function MediaCard({ item }: MediaCardProps) {
         </CardTitle>
         {item.groupTitle && (
           <p className="text-xs text-muted-foreground truncate">{item.groupTitle}</p>
+        )}
+        {nowPlaying && item.type === 'channel' && (
+          <p className="text-xs text-primary truncate mt-1" title={nowPlaying}>Now: {nowPlaying}</p>
         )}
       </CardContent>
       <CardFooter className="p-4 pt-0">
@@ -51,6 +57,3 @@ export function MediaCard({ item }: MediaCardProps) {
     </Card>
   );
 }
-
-// Necessary React import
-import React from 'react';

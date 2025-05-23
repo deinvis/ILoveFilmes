@@ -10,12 +10,23 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import type { MediaItem, EpgProgram } from '@/types';
 
-const ITEMS_PER_GROUP_PREVIEW = 4; // Changed from 5 to 4
+const ITEMS_PER_GROUP_PREVIEW = 4; 
 
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
-  const { playlists, mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
+  const { 
+    playlists, 
+    mediaItems, 
+    isLoading: storeIsLoading, 
+    error: storeError, 
+    fetchAndParsePlaylists,
+    epgData,
+    epgLoading,
+    fetchAndParseEpg // Ensure EPG data is fetched
+  } = usePlaylistStore();
+  
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -27,14 +38,19 @@ export default function ChannelsPage() {
   useEffect(() => {
     if (isClient) {
       fetchAndParsePlaylists();
+      if (usePlaylistStore.getState().epgUrl) { // Fetch EPG if URL is set
+        fetchAndParseEpg();
+      }
     }
-  }, [fetchAndParsePlaylists, isClient]);
+  }, [fetchAndParsePlaylists, fetchAndParseEpg, isClient]);
   
   useEffect(() => {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    if (isLoading && mediaItems.length === 0) { // Only show progress if no items are yet displayed
+    const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0);
+
+    if (combinedLoading && mediaItems.length === 0) { 
       setProgressValue(10); 
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -50,12 +66,12 @@ export default function ChannelsPage() {
         clearInterval(interval);
       }
     };
-  }, [isLoading, isClient, mediaItems]);
+  }, [storeIsLoading, epgLoading, epgData, isClient, mediaItems]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 300); // 300ms delay
+    }, 300); 
 
     return () => {
       clearTimeout(handler);
@@ -85,12 +101,18 @@ export default function ChannelsPage() {
     }, {} as Record<string, typeof filteredChannels>);
   }, [filteredChannels]);
 
+  const getNowPlaying = (tvgId?: string): EpgProgram | null => {
+    if (!tvgId || !epgData[tvgId] || epgLoading) return null;
+    const now = new Date();
+    return epgData[tvgId].find(prog => now >= prog.start && now < prog.end) || null;
+  };
 
-  if (!isClient || (isLoading && allChannels.length === 0)) {
+
+  if (!isClient || ((storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length === 0)) {
     return (
       <div>
         <h1 className="text-3xl font-bold mb-2 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
-        {isClient && isLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        {isClient && (storeIsLoading || epgLoading) && <Progress value={progressValue} className="w-full mb-8 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -106,18 +128,18 @@ export default function ChannelsPage() {
     );
   }
 
-  if (error) {
+  if (storeError) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <AlertTriangle className="w-16 h-16 text-destructive mb-4" />
         <h2 className="text-2xl font-semibold mb-2">Error Loading Channels</h2>
-        <p className="text-muted-foreground mb-4">{error}</p>
+        <p className="text-muted-foreground mb-4">{storeError}</p>
         <Button onClick={() => fetchAndParsePlaylists(true)}>Try Again</Button>
       </div>
     );
   }
   
-  if (playlists.length === 0 && !isLoading) {
+  if (playlists.length === 0 && !storeIsLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
@@ -132,7 +154,7 @@ export default function ChannelsPage() {
     );
   }
 
-  if (mediaItems.length > 0 && allChannels.length === 0 && !isLoading) {
+  if (mediaItems.length > 0 && allChannels.length === 0 && !storeIsLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
@@ -151,7 +173,7 @@ export default function ChannelsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
-        {!isLoading && allChannels.length > 0 && (
+        {!storeIsLoading && allChannels.length > 0 && (
           <div className="relative sm:w-1/2 md:w-1/3">
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -165,9 +187,9 @@ export default function ChannelsPage() {
         )}
       </div>
 
-      {isClient && isLoading && allChannels.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
       
-      {filteredChannels.length === 0 && debouncedSearchTerm && !isLoading && (
+      {filteredChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-10">
           <Search className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <p className="text-muted-foreground">No channels found matching your search for "{debouncedSearchTerm}".</p>
@@ -189,13 +211,20 @@ export default function ChannelsPage() {
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => (
-              <MediaCard key={item.id} item={item} />
-            ))}
+            {items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => {
+              const nowPlayingProgram = getNowPlaying(item.tvgId);
+              return (
+                <MediaCard 
+                  key={item.id} 
+                  item={item} 
+                  nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined} 
+                />
+              );
+            })}
           </div>
         </section>
       ))}
-       {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !isLoading && (
+       {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-10">
            <p className="text-muted-foreground">No channels to display with current filters.</p>
          </div>

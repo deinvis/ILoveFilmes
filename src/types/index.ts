@@ -1,3 +1,4 @@
+
 export type MediaType = 'channel' | 'movie' | 'series';
 
 export interface PlaylistItem {
@@ -16,4 +17,13 @@ export interface MediaItem {
   description?: string;
   genre?: string;
   groupTitle?: string; // For M3U group-title
+  tvgId?: string; // tvg-id from M3U, used for EPG mapping
+}
+
+export interface EpgProgram {
+  title: string;
+  description?: string;
+  start: Date;
+  end: Date;
+  channelId: string;
 }
