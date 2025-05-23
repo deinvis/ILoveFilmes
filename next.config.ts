@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        protocol: 'http',
+        hostname: '**', // Allow all HTTP hostnames on port 8080
+        port: '8080',
+        pathname: '/**',
+      },
     ],
   },
 };
