@@ -1,3 +1,4 @@
+
 "use client";
 
 import { create } from 'zustand';
@@ -52,8 +53,8 @@ export const usePlaylistStore = create<PlaylistState>()(
           };
           set((state) => ({
             playlists: [...state.playlists, newPlaylist],
-            isLoading: false,
           }));
+          // No longer setting isLoading to false here, fetchAndParsePlaylists will handle it
           await get().fetchAndParsePlaylists(); // Reparse all playlists
         } catch (e) {
           set({ isLoading: false, error: "Failed to add playlist." });
@@ -71,6 +72,11 @@ export const usePlaylistStore = create<PlaylistState>()(
         const currentPlaylists = get().playlists;
         let allMediaItems: MediaItem[] = [];
         try {
+          if (currentPlaylists.length === 0) {
+            // If no playlists, set items to empty and stop loading
+            set({ mediaItems: [], isLoading: false });
+            return;
+          }
           for (const playlist of currentPlaylists) {
             // In a real app, you would fetch the content of playlist.url here
             // const response = await fetch(playlist.url);
@@ -96,7 +102,6 @@ export const usePlaylistStore = create<PlaylistState>()(
   )
 );
 
-// Initial fetch when the app loads and store is hydrated
-if (typeof window !== 'undefined') {
-    usePlaylistStore.getState().fetchAndParsePlaylists();
-}
+// Removed initial fetch: if (typeof window !== 'undefined') { usePlaylistStore.getState().fetchAndParsePlaylists(); }
+// Components will call fetchAndParsePlaylists in useEffect after mount.
+

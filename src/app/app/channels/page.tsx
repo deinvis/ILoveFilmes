@@ -11,14 +11,23 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 
 export default function ChannelsPage() {
-  const { mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
+  const [isClient, setIsClient] = useState(false);
+  const { playlists, mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
   const [progressValue, setProgressValue] = useState(10);
 
   useEffect(() => {
-    fetchAndParsePlaylists();
-  }, [fetchAndParsePlaylists]);
+    setIsClient(true);
+  }, []);
   
   useEffect(() => {
+    if (isClient) {
+      fetchAndParsePlaylists();
+    }
+  }, [fetchAndParsePlaylists, isClient]);
+  
+  useEffect(() => {
+    if (!isClient) return;
+
     let interval: NodeJS.Timeout | undefined;
     if (isLoading) {
       setProgressValue(10); // Reset to initial for animation
@@ -36,7 +45,7 @@ export default function ChannelsPage() {
         clearInterval(interval);
       }
     };
-  }, [isLoading]);
+  }, [isLoading, isClient]);
 
   const channels = mediaItems.filter(item => item.type === 'channel');
 
@@ -50,11 +59,11 @@ export default function ChannelsPage() {
   }, {} as Record<string, typeof channels>);
 
 
-  if (isLoading && channels.length === 0) {
+  if (!isClient || (isLoading && channels.length === 0)) {
     return (
       <div>
         <h1 className="text-3xl font-bold mb-4 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
-        <Progress value={progressValue} className="w-full mb-8 h-2" />
+        {isClient && isLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -81,6 +90,21 @@ export default function ChannelsPage() {
     );
   }
   
+  if (playlists.length === 0 && !isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center">
+        <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">No Playlists Added</h2>
+        <p className="text-muted-foreground mb-4">
+          Please add an M3U playlist in the settings to see channels.
+        </p>
+        <Link href="/app/settings" passHref>
+          <Button>Go to Settings</Button>
+        </Link>
+      </div>
+    );
+  }
+
   if (mediaItems.length > 0 && channels.length === 0 && !isLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center">
@@ -96,26 +120,10 @@ export default function ChannelsPage() {
     );
   }
 
-
-  if (usePlaylistStore.getState().playlists.length === 0 && !isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">No Playlists Added</h2>
-        <p className="text-muted-foreground mb-4">
-          Please add an M3U playlist in the settings to see channels.
-        </p>
-        <Link href="/app/settings" passHref>
-          <Button>Go to Settings</Button>
-        </Link>
-      </div>
-    );
-  }
-
-
   return (
     <div className="space-y-10">
-      <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+      <h1 className="text-3xl font-bold flex items-center mb-4"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+      {isClient && isLoading && channels.length > 0 && <Progress value={progressValue} className="w-full mb-8 h-2" />}
       {Object.entries(groupedChannels).map(([groupName, items]) => (
         <section key={groupName}>
           <h2 className="text-2xl font-semibold mb-6 capitalize">{groupName}</h2>

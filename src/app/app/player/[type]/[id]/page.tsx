@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useEffect, useState }from 'react';
@@ -12,20 +13,28 @@ import { Skeleton } from '@/components/ui/skeleton';
 export default function PlayerPage() {
   const params = useParams();
   const router = useRouter();
+  const [isClient, setIsClient] = useState(false);
   const { mediaItems, isLoading, fetchAndParsePlaylists } = usePlaylistStore();
   const [itemToPlay, setItemToPlay] = useState<MediaItem | null | undefined>(undefined); // undefined for loading, null for not found
 
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
   
   useEffect(() => {
-    // Ensure playlists are loaded if not already
-    if (mediaItems.length === 0 && !isLoading) {
-      fetchAndParsePlaylists();
+    if (isClient) {
+      // Ensure playlists are loaded if not already
+      if (mediaItems.length === 0 && !isLoading) {
+        fetchAndParsePlaylists();
+      }
     }
-  }, [mediaItems, isLoading, fetchAndParsePlaylists]);
+  }, [isClient, mediaItems, isLoading, fetchAndParsePlaylists]);
 
   useEffect(() => {
+    if (!isClient) return;
+
     if (mediaItems.length > 0) {
       const foundItem = mediaItems.find(item => item.id === decodeURIComponent(itemId));
       setItemToPlay(foundItem || null);
@@ -33,15 +42,21 @@ export default function PlayerPage() {
       // If not loading and no media items, it implies it might not be found or playlists are empty
        setItemToPlay(null);
     }
-  }, [itemId, mediaItems, isLoading]);
+  }, [isClient, itemId, mediaItems, isLoading]);
 
-  if (itemToPlay === undefined || (isLoading && mediaItems.length === 0)) {
+  if (!isClient || itemToPlay === undefined || (isLoading && mediaItems.length === 0 && itemToPlay === undefined)) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-12 w-48" />
-        <Skeleton className="w-full aspect-video rounded-lg" />
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-20 w-full" />
+      <div className="max-w-4xl mx-auto">
+        <Skeleton className="h-10 w-32 mb-6" /> {/* Back button placeholder */}
+        <Skeleton className="h-12 w-3/4 mb-1" /> {/* Title placeholder */}
+        <Skeleton className="h-6 w-1/2 mb-4" /> {/* Group/Genre placeholder */}
+        <Skeleton className="w-full aspect-video rounded-lg shadow-2xl" /> {/* Video player placeholder */}
+        <div className="mt-6 p-4 border rounded-lg bg-card"> {/* Description card placeholder */}
+          <Skeleton className="h-8 w-1/3 mb-2" /> {/* Description title placeholder */}
+          <Skeleton className="h-5 w-full mb-1" />
+          <Skeleton className="h-5 w-full mb-1" />
+          <Skeleton className="h-5 w-3/4" />
+        </div>
       </div>
     );
   }
