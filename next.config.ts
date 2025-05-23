@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
         port: '8080',
         pathname: '/**',
       },
+      { // Added for TMDB images
+        protocol: 'https',
+        hostname: 'image.tmdb.org',
+        port: '',
+        pathname: '/t/p/**',
+      }
     ],
   },
 };
