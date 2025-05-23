@@ -1,47 +1,121 @@
+
 import type { MediaItem, MediaType } from '@/types';
 
-// This is a very basic placeholder for M3U parsing.
-// A real M3U parser would be much more complex.
-export function parseM3U(m3uStringOrUrl: string, playlistId: string): MediaItem[] {
-  console.log(`Parsing M3U for playlist ID: ${playlistId}, (mock) content/url: ${m3uStringOrUrl}`);
+export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
+  console.log(`Fetching and parsing M3U for playlist ID: ${playlistId}, URL: ${playlistUrl}`);
+  let m3uString: string;
+  try {
+    // Add a timestamp to try and bypass cache if needed, though server should handle caching.
+    const cacheBustingUrl = `${playlistUrl}${playlistUrl.includes('?') ? '&' : '?'}timestamp=${new Date().getTime()}`;
+    const response = await fetch(cacheBustingUrl);
+    if (!response.ok) {
+      console.error(`Failed to fetch playlist ${playlistUrl}: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch playlist (${response.status})`);
+    }
+    m3uString = await response.text();
+  } catch (error: any) {
+    console.error(`Error fetching playlist ${playlistUrl}:`, error);
+    throw new Error(`Network error or invalid URL: ${error.message}`);
+  }
+
+  const lines = m3uString.split(/\r?\n/);
   const items: MediaItem[] = [];
-  const types: MediaType[] = ['channel', 'movie', 'series'];
-  const commonPoster = 'https://placehold.co/300x450.png';
+  let currentRawItem: Record<string, any> = {};
 
-  for (let i = 1; i <= 15; i++) {
-    const type = types[i % 3];
-    let titlePrefix = '';
-    let groupTitle = '';
-    let dataAiHint = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
 
-    switch (type) {
-      case 'channel':
-        titlePrefix = 'Channel';
-        groupTitle = i % 2 === 0 ? 'News Channels' : 'Entertainment Channels';
-        dataAiHint = 'tv broadcast';
-        break;
-      case 'movie':
-        titlePrefix = 'Movie';
-        groupTitle = i % 2 === 0 ? 'Action Movies' : 'Comedy Movies';
-        dataAiHint = 'movie poster';
-        break;
-      case 'series':
-        titlePrefix = 'Series';
-        groupTitle = i % 2 === 0 ? 'Sci-Fi Series' : 'Drama Series';
-        dataAiHint = 'tv series';
-        break;
+    if (line.startsWith('#EXTM3U')) {
+      continue; // Standard M3U header
     }
 
-    items.push({
-      id: `${playlistId}-${type}-${i}`,
-      type: type,
-      title: `${titlePrefix} ${i} (from P${playlistId.slice(0,2)})`,
-      posterUrl: `${commonPoster}?t=${type}${i}&hint=${encodeURIComponent(dataAiHint)}`, // Added hint for placeholder
-      streamUrl: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4`, // Placeholder stream
-      description: `This is a mock description for ${titlePrefix} ${i}. It belongs to playlist ${playlistId}.`,
-      genre: type === 'movie' ? (i % 2 === 0 ? 'Action' : 'Comedy') : (type === 'series' ? (i % 2 === 0 ? 'Sci-Fi' : 'Drama') : 'General'),
-      groupTitle: groupTitle,
-    });
+    if (line.startsWith('#EXTINF:')) {
+      currentRawItem = { originatingPlaylistId: playlistId }; // Store for unique ID generation context
+      const infoLineContent = line.substring(line.indexOf(':') + 1);
+      
+      const lastCommaIndex = infoLineContent.lastIndexOf(',');
+      let attributesString = infoLineContent;
+      let extinfTitle = '';
+
+      if (lastCommaIndex !== -1) {
+        attributesString = infoLineContent.substring(0, lastCommaIndex);
+        extinfTitle = infoLineContent.substring(lastCommaIndex + 1).trim();
+      } else {
+        // If no comma, the whole string after ':' might be attributes or just a duration.
+        // For simplicity, assume if no comma, it might just be duration or title is missing.
+        // A more robust parser might handle this differently.
+        // We'll rely on tvg-name or parse the title from after attributes.
+      }
+      
+      currentRawItem.title = extinfTitle; 
+
+      const attributeRegex = /(\S+?)="([^"]*)"/g;
+      let match;
+      while ((match = attributeRegex.exec(attributesString)) !== null) {
+        const key = match[1].toLowerCase().replace(/-/g, ''); // Normalize key: tvg-id -> tvgid
+        const value = match[2].trim();
+        currentRawItem[key] = value;
+      }
+
+      if (currentRawItem.tvgname) {
+        currentRawItem.title = currentRawItem.tvgname;
+      }
+      
+      if (currentRawItem.tvglogo) {
+        currentRawItem.posterUrl = currentRawItem.tvglogo;
+      }
+      
+      if (currentRawItem.grouptitle) {
+        currentRawItem.groupTitle = currentRawItem.grouptitle;
+      }
+
+    } else if (line && !line.startsWith('#')) {
+      // This line is the stream URL
+      if (currentRawItem.title || currentRawItem.tvgname) { 
+        const streamUrl = line;
+        const { 
+          title = 'Untitled', 
+          posterUrl, 
+          groupTitle, 
+          tvgid, 
+          tvgchno, // Channel number, can be useful
+          originatingPlaylistId 
+        } = currentRawItem;
+
+        const baseIdSource = tvgid || tvgchno || title.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 50) || `item${items.length}`;
+        const itemId = `${originatingPlaylistId}-${baseIdSource}`;
+
+        let mediaType: MediaType = 'channel';
+        const lowerGroupTitle = groupTitle?.toLowerCase() || '';
+        const lowerTitle = title?.toLowerCase() || '';
+
+        if (lowerGroupTitle.includes('movie') || lowerGroupTitle.includes('filme') || lowerTitle.includes('movie') || lowerTitle.includes('filme')) {
+          mediaType = 'movie';
+        } else if (lowerGroupTitle.includes('serie') || lowerGroupTitle.includes('série') || lowerGroupTitle.includes('series') || lowerTitle.includes('series') ) {
+          mediaType = 'series';
+        }
+        
+        let finalPosterUrl = posterUrl;
+        if (!finalPosterUrl || finalPosterUrl.trim() === '') {
+            const dataAiHint = mediaType === 'movie' ? 'movie poster' : mediaType === 'series' ? 'tv series' : 'tv broadcast';
+            finalPosterUrl = `https://placehold.co/300x450.png?hint=${encodeURIComponent(dataAiHint)}`;
+        }
+
+        const mediaItem: MediaItem = {
+          id: itemId,
+          type: mediaType,
+          title: title,
+          posterUrl: finalPosterUrl,
+          streamUrl: streamUrl,
+          groupTitle: groupTitle,
+          genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined,
+          description: `Title: ${title}. Group: ${groupTitle || 'N/A'}.`,
+        };
+        items.push(mediaItem);
+        currentRawItem = {}; 
+      }
+    }
   }
+  console.log(`Parsed ${items.length} items from ${playlistUrl}`);
   return items;
 }
