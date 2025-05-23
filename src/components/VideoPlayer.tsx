@@ -17,55 +17,93 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
     const videoElement = videoRef.current;
     if (!videoElement) return;
 
-    // Função para tentar iniciar a reprodução e logar erros de autoplay
-    const tryPlay = (element: HTMLVideoElement, source: string) => {
-      console.log(`Attempting to play ${source}`);
+    // Helper function to log MediaError details
+    const logMediaError = (context: string, error: MediaError | null) => {
+      if (error) {
+        let details = `Error Code: ${error.code}`;
+        if (error.message) {
+          details += `, Message: ${error.message}`;
+        }
+        // Expand on error codes
+        switch (error.code) {
+          case MediaError.MEDIA_ERR_ABORTED:
+            details += ' (The fetching process for the media resource was aborted by the user.)';
+            break;
+          case MediaError.MEDIA_ERR_NETWORK:
+            details += ' (A network error occurred while fetching the media resource.)';
+            break;
+          case MediaError.MEDIA_ERR_DECODE:
+            details += ' (An error occurred while decoding the media resource, possibly due to corruption or unsupported codecs.)';
+            break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            details += ' (The media resource specified by src was not suitable or the format is not supported.)';
+            break;
+          default:
+            details += ' (Unknown error code.)';
+        }
+        console.error(`${context}: ${details}`, error);
+      } else {
+        console.error(`${context}: An unknown error occurred with the video element.`);
+      }
+    };
+    
+    const tryPlay = (element: HTMLVideoElement, sourceDescription: string) => {
+      console.log(`Attempting to play: ${sourceDescription} for URL: ${element.src || item.streamUrl}`);
       element.play().catch(error => {
-        console.warn(`Autoplay was prevented for ${source}:`, error.name, error.message);
-        // Você pode querer atualizar o estado da UI aqui para indicar que o usuário precisa clicar para tocar.
+        console.warn(`Autoplay was prevented for ${sourceDescription} (URL: ${element.src || item.streamUrl}):`, error.name, error.message);
+        // UI could be updated here to indicate user interaction is needed.
       });
     };
 
     const setupHlsPlayer = () => {
       if (Hls.isSupported()) {
         console.log("HLS.js is supported. Setting up HLS player for:", item.streamUrl);
-        const hls = new Hls();
+        const hls = new Hls({
+          // Example: Enable detailed logging from HLS.js
+          // debug: true, 
+          // Example: Start loading 5 seconds from the live edge
+          // liveSyncDurationCount: 3, 
+          // liveMaxLatencyDurationCount: 5,
+          // Example: Increase buffer to potentially help with stalling
+          // maxBufferLength: 60, // seconds
+        });
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(videoElement);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          console.log("HLS.js: Manifest parsed. Attempting to play.");
+          console.log("HLS.js: Manifest parsed.");
           tryPlay(videoElement, "HLS.js stream");
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
+          console.error('HLS.js Error:', { event, data });
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                console.error('HLS.js fatal network error:', data);
+                console.error('HLS.js fatal network error:', data.details);
+                // Attempt to recover from manifest load errors
                 if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                    console.error("HLS.js: Failed to load HLS manifest. Check URL and CORS.");
-                }
-                // Não destruir aqui, pode tentar recoverMediaError
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                console.error('HLS.js fatal media error:', data);
-                if (data.details === 'bufferStalledError') {
-                  console.warn('HLS.js: Buffer stalled, trying to recover.');
-                  hls.recoverMediaError();
-                } else if (data.details === 'fragParsingError') {
-                   console.error('HLS.js: Fragment parsing error. This can be due to malformed segments.');
-                   // Não tentar recuperar automaticamente, pode ser um problema persistente no stream
+                   hls.loadSource(item.streamUrl); // Retry loading manifest
+                } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+                    hls.startLoad(); // Retry loading fragment
                 } else {
                    hls.recoverMediaError();
                 }
                 break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('HLS.js fatal media error:', data.details);
+                if (data.details === 'bufferStalledError' || data.details === 'bufferNudgeOnStall') {
+                  console.warn('HLS.js: Buffer issue, trying to recover.');
+                  hls.recoverMediaError();
+                } else {
+                   hls.recoverMediaError(); // General recovery attempt
+                }
+                break;
               default:
                 console.error('HLS.js fatal error (other):', data);
-                // Destruir em outros erros fatais pode ser muito agressivo.
-                // hls.destroy(); // Comentado para evitar destruição prematura
-                // hlsRef.current = null;
+                // Consider destroying and re-initializing HLS on certain unrecoverable errors
+                // hls.destroy(); hlsRef.current = null; // Potentially setupHlsPlayer() again or fallback
                 break;
             }
           } else {
@@ -76,16 +114,19 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         console.log("Native HLS playback is supported. Setting video src to:", item.streamUrl);
         videoElement.src = item.streamUrl;
         videoElement.addEventListener('loadedmetadata', () => {
-          console.log("Native HLS: Metadata loaded. Attempting to play.");
+          console.log("Native HLS: Metadata loaded.");
           tryPlay(videoElement, "Native HLS stream");
         });
-        videoElement.addEventListener('error', (e) => {
-            console.error('Native HLS video element error:', videoElement.error);
+        videoElement.addEventListener('error', () => {
+            logMediaError('Native HLS video element error', videoElement.error);
         });
       } else {
-        console.warn("HLS.js is not supported, and native HLS playback is not available. Falling back to direct src.");
-        videoElement.src = item.streamUrl; // Fallback for non-HLS or unsupported browsers
+        console.warn("HLS.js is not supported, and native HLS playback is not available. Falling back to direct src for:", item.streamUrl);
+        videoElement.src = item.streamUrl; 
         tryPlay(videoElement, "Direct SRC fallback");
+         videoElement.addEventListener('error', () => {
+            logMediaError('Direct SRC fallback video element error', videoElement.error);
+        });
       }
     };
 
@@ -93,19 +134,18 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       console.log("Setting up default player for:", item.streamUrl);
       videoElement.src = item.streamUrl;
       videoElement.addEventListener('loadedmetadata', () => {
-          console.log("Default Player: Metadata loaded. Attempting to play.");
+          console.log("Default Player: Metadata loaded.");
           tryPlay(videoElement, "Default Player stream");
       });
-      videoElement.addEventListener('error', (e) => {
-            console.error('Default Player video element error:', videoElement.error);
+      videoElement.addEventListener('error', () => {
+            logMediaError('Default Player video element error', videoElement.error);
       });
     };
 
     if (item.streamUrl) {
-      // Limpar estado anterior do player
       videoElement.pause();
       videoElement.removeAttribute('src');
-      videoElement.load(); // Reseta o player e cancela downloads pendentes
+      videoElement.load(); 
 
       if (hlsRef.current) {
         console.log("Destroying previous HLS instance.");
@@ -113,7 +153,12 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         hlsRef.current = null;
       }
 
-      if (item.streamUrl.endsWith('.m3u8') || item.streamUrl.includes('m3u8')) { // Verificação mais flexível para m3u8
+      // More robust M3U8 check
+      const isHlsStream = item.streamUrl.includes('.m3u8') || 
+                          item.streamUrl.includes('/manifest') || 
+                          item.streamUrl.includes('.isml/manifest');
+
+      if (isHlsStream) {
         setupHlsPlayer();
       } else {
         setupDefaultPlayer();
@@ -129,14 +174,17 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       }
       if (videoElement) {
         videoElement.pause();
-        videoElement.removeAttribute('src');
-        videoElement.load();
-        // Remover event listeners adicionados explicitamente para evitar memory leaks
-        // Embora o React lide com isso para handlers JSX, listeners manuais precisam de limpeza.
-        // Mas como estamos recriando o player a cada mudança de item.streamUrl, os listeners são do elemento antigo.
+        videoElement.removeAttribute('src'); // Important to remove src to stop download/streaming
+        videoElement.load(); // Resets the media element
+         // Remove all manually added listeners to avoid memory leaks if component re-renders without full unmount/mount
+        const newVideoElement = videoElement.cloneNode(true) as HTMLVideoElement;
+        videoElement.parentNode?.replaceChild(newVideoElement, videoElement);
+        // videoRef.current = newVideoElement; // This line would break the ref if we re-assign it here.
+                                            // Instead, the effect's dependencies should ensure it re-runs correctly for a new item.
       }
     };
-  }, [item.streamUrl, item.id]); // Adicionado item.id para recriar o player se o mesmo streamUrl for usado por outro item.
+  // Adding item.id ensures the effect re-runs if the item changes, even if streamUrl is the same (less likely but good practice)
+  }, [item.streamUrl, item.id]); 
 
   return (
     <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl">
@@ -144,10 +192,10 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         ref={videoRef}
         controls
         className="w-full h-full"
-        playsInline // Importante para iOS
-        poster={item.posterUrl} // Adicionado poster
+        playsInline // Important for iOS and inline playback
+        poster={item.posterUrl} // Display poster before video loads
       >
-        Your browser does not support the video tag.
+        Your browser does not support the video tag or the video format.
       </video>
     </div>
   );
