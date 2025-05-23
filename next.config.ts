@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
         port: '', // Allows any port, including the implicit 80 for http
         pathname: '/**',
       },
+      {
+        protocol: 'http',
+        hostname: '97j91.xyz',
+        port: '',
+        pathname: '/**',
+      },
     ],
   },
 };
