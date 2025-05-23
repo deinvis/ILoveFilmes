@@ -10,15 +10,28 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Palette, ListPlus, CalendarDays, Save, Home } from 'lucide-react';
+import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { usePlaylistStore } from '@/store/playlistStore';
 import { useToast } from "@/hooks/use-toast";
 import type { StartPagePath } from '@/types';
 
 const startPageOptions: { value: StartPagePath, label: string }[] = [
-  { value: '/app/channels', label: 'Channels' },
-  { value: '/app/movies', label: 'Movies' },
-  { value: '/app/series', label: 'Series' },
+  { value: '/app/channels', label: 'Canais' },
+  { value: '/app/movies', label: 'Filmes' },
+  { value: '/app/series', label: 'Séries' },
+  { value: '/app/favorites', label: 'Favoritos' },
+  { value: '/app/recent', label: 'Recentes' },
 ];
 
 export default function SettingsPage() {
@@ -28,7 +41,8 @@ export default function SettingsPage() {
     epgLoading, 
     epgError,
     preferredStartPage,
-    setPreferredStartPage
+    setPreferredStartPage,
+    resetAppState // Get the new action
   } = usePlaylistStore();
   
   const [currentEpgUrl, setCurrentEpgUrl] = useState(epgUrl || '');
@@ -42,22 +56,22 @@ export default function SettingsPage() {
     if (!currentEpgUrl.trim()) {
       await setEpgUrl(null);
        toast({
-        title: "EPG URL Cleared",
-        description: "EPG URL has been removed.",
+        title: "EPG URL Removido",
+        description: "A URL do EPG foi removida.",
       });
       return;
     }
     try {
-      new URL(currentEpgUrl); // Basic URL validation
+      new URL(currentEpgUrl); 
       await setEpgUrl(currentEpgUrl);
       toast({
-        title: "EPG URL Saved",
-        description: "EPG data will be fetched and updated.",
+        title: "EPG URL Salvo",
+        description: "Os dados do EPG serão buscados e atualizados.",
       });
     } catch (_) {
       toast({
-        title: "Invalid EPG URL",
-        description: "Please enter a valid URL format for the EPG.",
+        title: "URL do EPG Inválida",
+        description: "Por favor, insira um formato de URL válido para o EPG.",
         variant: "destructive",
       });
     }
@@ -66,19 +80,29 @@ export default function SettingsPage() {
   const handleStartPageChange = (value: string) => {
     setPreferredStartPage(value as StartPagePath);
     toast({
-      title: "Start Page Updated",
-      description: `Your app will now open to ${startPageOptions.find(opt => opt.value === value)?.label || 'the selected page'}.`,
+      title: "Página Inicial Atualizada",
+      description: `Seu aplicativo agora abrirá em ${startPageOptions.find(opt => opt.value === value)?.label || 'página selecionada'}.`,
     });
+  };
+
+  const handleResetData = () => {
+    resetAppState();
+    toast({
+      title: "Dados do Aplicativo Redefinidos",
+      description: "Todas as suas configurações, playlists e histórico foram limpos. Pode ser necessário recarregar a página.",
+    });
+    // Optional: force reload for a clean slate immediately
+    // setTimeout(() => window.location.reload(), 1000);
   };
 
   return (
     <div className="space-y-10 max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold">Settings</h1>
+      <h1 className="text-3xl font-bold">Configurações</h1>
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center text-xl"><Palette className="mr-3 h-6 w-6 text-primary" /> Theme Settings</CardTitle>
-          <CardDescription>Customize the look and feel of StreamVerse.</CardDescription>
+          <CardTitle className="flex items-center text-xl"><Palette className="mr-3 h-6 w-6 text-primary" /> Configurações de Tema</CardTitle>
+          <CardDescription>Personalize a aparência do StreamVerse.</CardDescription>
         </CardHeader>
         <CardContent className="w-full sm:w-1/2 lg:w-1/3">
           <ThemeToggle />
@@ -89,8 +113,8 @@ export default function SettingsPage() {
 
        <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center text-xl"><Home className="mr-3 h-6 w-6 text-primary" /> Startup Preferences</CardTitle>
-          <CardDescription>Choose which page StreamVerse opens to by default.</CardDescription>
+          <CardTitle className="flex items-center text-xl"><Home className="mr-3 h-6 w-6 text-primary" /> Preferências de Inicialização</CardTitle>
+          <CardDescription>Escolha qual página o StreamVerse abrirá por padrão.</CardDescription>
         </CardHeader>
         <CardContent>
           <RadioGroup
@@ -112,8 +136,8 @@ export default function SettingsPage() {
 
       <Card className="shadow-lg">
          <CardHeader>
-          <CardTitle className="flex items-center text-xl"><ListPlus className="mr-3 h-6 w-6 text-primary" /> Playlist Settings</CardTitle>
-          <CardDescription>Manage your M3U playlist sources.</CardDescription>
+          <CardTitle className="flex items-center text-xl"><ListPlus className="mr-3 h-6 w-6 text-primary" /> Configurações de Playlist</CardTitle>
+          <CardDescription>Gerencie suas fontes de playlist M3U.</CardDescription>
         </CardHeader>
         <CardContent>
           <PlaylistManager />
@@ -124,14 +148,14 @@ export default function SettingsPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center text-xl"><CalendarDays className="mr-3 h-6 w-6 text-primary" /> EPG (Electronic Program Guide) Settings</CardTitle>
-          <CardDescription>Set your XMLTV EPG URL to get program information for your channels.</CardDescription>
+          <CardTitle className="flex items-center text-xl"><CalendarDays className="mr-3 h-6 w-6 text-primary" /> Configurações de EPG (Guia de Programação)</CardTitle>
+          <CardDescription>Defina sua URL de EPG XMLTV para obter informações de programação para seus canais.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex space-x-2 items-center">
             <Input
               type="url"
-              placeholder="Enter XMLTV EPG URL (e.g., https://example.com/epg.xml)"
+              placeholder="Insira a URL do EPG XMLTV (ex: https://example.com/epg.xml)"
               value={currentEpgUrl}
               onChange={(e) => setCurrentEpgUrl(e.target.value)}
               className="flex-grow"
@@ -139,20 +163,59 @@ export default function SettingsPage() {
             />
             <Button onClick={handleSaveEpgUrl} disabled={epgLoading}>
               <Save className="mr-2 h-4 w-4" />
-              {epgLoading ? 'Saving...' : 'Save EPG'}
+              {epgLoading ? 'Salvando...' : 'Salvar EPG'}
             </Button>
           </div>
           {epgError && (
             <p className="text-sm text-destructive">{epgError}</p>
           )}
           {epgLoading && (
-            <p className="text-sm text-muted-foreground">Fetching and processing EPG data...</p>
+            <p className="text-sm text-muted-foreground">Buscando e processando dados do EPG...</p>
           )}
           {epgUrl && !epgLoading && !epgError && (
-             <p className="text-sm text-green-600">EPG data loaded successfully from: {epgUrl}</p>
+             <p className="text-sm text-green-600">Dados do EPG carregados com sucesso de: {epgUrl}</p>
           )}
         </CardContent>
       </Card>
+
+      <Separator />
+
+      <Card className="shadow-lg border-destructive">
+        <CardHeader>
+          <CardTitle className="flex items-center text-xl text-destructive"><Trash2 className="mr-3 h-6 w-6" /> Gerenciamento de Dados</CardTitle>
+          <CardDescription>Ações perigosas para redefinir os dados do aplicativo.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive">
+                <AlertTriangle className="mr-2 h-4 w-4" />
+                Limpar Todos os Dados do Aplicativo
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Esta ação é irreversível e removerá todas as suas playlists, EPG URL,
+                  favoritos, histórico de reprodução e outras configurações.
+                  Seus dados serão completamente apagados.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleResetData} className="bg-destructive hover:bg-destructive/90">
+                  Sim, limpar tudo
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <p className="text-xs text-muted-foreground mt-3">
+            Isso removerá todos os dados armazenados localmente pelo StreamVerse.
+          </p>
+        </CardContent>
+      </Card>
+
     </div>
   );
 }

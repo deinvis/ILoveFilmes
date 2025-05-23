@@ -1,6 +1,6 @@
 
 export type MediaType = 'channel' | 'movie' | 'series';
-export type StartPagePath = '/app/channels' | '/app/movies' | '/app/series';
+export type StartPagePath = '/app/channels' | '/app/movies' | '/app/series' | '/app/favorites' | '/app/recent';
 
 export interface PlaylistItem {
   id: string;
@@ -16,7 +16,7 @@ export interface MediaItem {
   posterUrl?: string;
   streamUrl: string;
   description?: string;
-  genre?: string; // Primarily from M3U group-title for series/movies
+  genre?: string; // Primarily from M3U group-title for series/movies or tvg-genre
   groupTitle?: string; // For M3U group-title
   tvgId?: string; // tvg-id from M3U, used for EPG mapping
 }
@@ -27,4 +27,9 @@ export interface EpgProgram {
   start: Date;
   end: Date;
   channelId: string;
+}
+
+export interface RecentlyPlayedItem {
+  itemId: string;
+  timestamp: number;
 }

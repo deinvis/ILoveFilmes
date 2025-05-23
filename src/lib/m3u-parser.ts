@@ -100,16 +100,14 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       const attributeRegex = /(\S+?)="([^"]*)"/g;
       let match;
       while ((match = attributeRegex.exec(attributesString)) !== null) {
-        const key = match[1].toLowerCase().replace(/-/g, ''); // e.g., tvg-id -> tvgid
+        const key = match[1].toLowerCase().replace(/-/g, '');
         const value = match[2].trim();
         currentRawItem[key] = value;
       }
       
-      // Ensure tvg-id is captured as tvgId for EPG linking
       if (currentRawItem.tvgid && !currentRawItem.tvgId) {
           currentRawItem.tvgId = currentRawItem.tvgid;
       }
-
 
       if (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '') {
         currentRawItem.title = currentRawItem.tvgname.trim();
@@ -122,34 +120,32 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       if (currentRawItem.tvglogo) {
         currentRawItem.posterUrl = currentRawItem.tvglogo;
       }
-
-      if (currentRawItem.grouptitle) {
-        currentRawItem.groupTitle = currentRawItem.grouptitle;
-      }
+      // grouptitle is captured as currentRawItem.grouptitle
+      // tvg-genre is captured as currentRawItem.tvggenre
 
     } else if (line && !line.startsWith('#')) {
       if (currentRawItem.title ) {
         const streamUrl = line;
         const {
-          posterUrl,
-          groupTitle,
-          tvgId, // Use the correctly cased tvgId
+          posterUrl, // from tvg-logo
+          grouptitle, // from group-title attribute
+          tvggenre, // from tvg-genre attribute
+          tvgId,
           originatingPlaylistId
         } = currentRawItem;
 
         const finalTitle = currentRawItem.title;
 
         const itemIndexInFile = items.length;
-        // Use tvgId in itemId if available, otherwise fallback
         let semanticPart = tvgId || currentRawItem.tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         let mediaType: MediaType;
-        const lowerGroupTitle = (groupTitle || '').toLowerCase();
+        const lowerGroupTitle = (grouptitle || '').toLowerCase();
         const lowerTitle = finalTitle.toLowerCase();
         const lowerStreamUrl = streamUrl.toLowerCase();
         const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
-
+        
         // Prioritized Rules:
         if (lowerStreamUrl.endsWith('.ts')) {
             mediaType = 'channel';
@@ -180,7 +176,16 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          mediaType = 'channel';
+          mediaType = 'channel'; 
+        }
+
+        let finalGenre: string | undefined = undefined;
+        if (mediaType === 'movie' || mediaType === 'series') {
+            if (tvggenre) { // Prefer tvg-genre if it exists
+                finalGenre = tvggenre;
+            } else if (grouptitle) { // Fallback to group-title for VOD genre
+                finalGenre = grouptitle;
+            }
         }
 
         const mediaItem: MediaItem = {
@@ -189,10 +194,10 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           title: finalTitle,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: groupTitle,
-          tvgId: tvgId, // Store tvgId
-          genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined,
-          description: `Title: ${finalTitle}. Group: ${groupTitle || 'N/A'}. Type: ${mediaType}. Parsed from playlist: ${playlistId}`,
+          groupTitle: grouptitle, // Always the raw group-title from M3U
+          tvgId: tvgId,
+          genre: finalGenre, // Derived from tvg-genre or group-title for VOD
+          description: `Title: ${finalTitle}. Group: ${grouptitle || 'N/A'}. Type: ${mediaType}. Parsed from playlist: ${playlistId}`,
         };
         items.push(mediaItem);
         currentRawItem = {};

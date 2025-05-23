@@ -10,9 +10,12 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import type { MediaItem, EpgProgram } from '@/types';
 
 const ITEMS_PER_GROUP_PREVIEW = 4; 
+type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
@@ -24,12 +27,13 @@ export default function ChannelsPage() {
     fetchAndParsePlaylists,
     epgData,
     epgLoading,
-    fetchAndParseEpg // Ensure EPG data is fetched
+    fetchAndParseEpg
   } = usePlaylistStore();
   
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('default');
 
   useEffect(() => {
     setIsClient(true);
@@ -38,7 +42,7 @@ export default function ChannelsPage() {
   useEffect(() => {
     if (isClient) {
       fetchAndParsePlaylists();
-      if (usePlaylistStore.getState().epgUrl) { // Fetch EPG if URL is set
+      if (usePlaylistStore.getState().epgUrl) { 
         fetchAndParseEpg();
       }
     }
@@ -78,7 +82,19 @@ export default function ChannelsPage() {
     };
   }, [searchTerm]);
 
-  const allChannels = useMemo(() => mediaItems.filter(item => item.type === 'channel'), [mediaItems]);
+  const allChannels = useMemo(() => {
+    let channels = mediaItems.filter(item => item.type === 'channel');
+    switch (sortOrder) {
+      case 'title-asc':
+        channels = [...channels].sort((a, b) => a.title.localeCompare(b.title));
+        break;
+      case 'title-desc':
+        channels = [...channels].sort((a, b) => b.title.localeCompare(a.title));
+        break;
+      // 'default' case: no sorting, use original order from mediaItems
+    }
+    return channels;
+  }, [mediaItems, sortOrder]);
 
   const filteredChannels = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -110,8 +126,10 @@ export default function ChannelsPage() {
 
   if (!isClient || ((storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length === 0)) {
     return (
-      <div>
-        <h1 className="text-3xl font-bold mb-2 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+        </div>
         {isClient && (storeIsLoading || epgLoading) && <Progress value={progressValue} className="w-full mb-8 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
@@ -130,25 +148,27 @@ export default function ChannelsPage() {
 
   if (storeError) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        <AlertTriangle className="w-16 h-16 text-destructive mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Error Loading Channels</h2>
-        <p className="text-muted-foreground mb-4">{storeError}</p>
-        <Button onClick={() => fetchAndParsePlaylists(true)}>Try Again</Button>
+      <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
+        <AlertTriangle className="w-20 h-20 text-destructive mb-6" />
+        <h2 className="text-3xl font-semibold mb-3">Error Loading Channels</h2>
+        <p className="text-muted-foreground text-lg mb-8 max-w-md">{storeError}</p>
+        <Button onClick={() => fetchAndParsePlaylists(true)} size="lg">
+          Try Again
+        </Button>
       </div>
     );
   }
   
   if (playlists.length === 0 && !storeIsLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">No Playlists Added</h2>
-        <p className="text-muted-foreground mb-4">
-          Please add an M3U playlist in the settings to see channels.
+      <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
+        <Tv2 className="w-24 h-24 text-primary mb-6" />
+        <h2 className="text-3xl font-semibold mb-3">No Playlists Found</h2>
+        <p className="text-muted-foreground text-lg mb-8 max-w-md">
+          To get started, please add an M3U playlist in the settings. This will allow you to browse and watch channels.
         </p>
         <Link href="/app/settings" passHref>
-          <Button>Go to Settings</Button>
+          <Button size="lg">Go to Settings</Button>
         </Link>
       </div>
     );
@@ -156,14 +176,14 @@ export default function ChannelsPage() {
 
   if (mediaItems.length > 0 && allChannels.length === 0 && !storeIsLoading) {
      return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">No Channels Found</h2>
-        <p className="text-muted-foreground mb-4">
-          It seems there are no channels in your playlists. Try adding a playlist with TV channels.
+      <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
+        <Tv2 className="w-24 h-24 text-muted-foreground mb-6" />
+        <h2 className="text-3xl font-semibold mb-3">No Channels Found</h2>
+        <p className="text-muted-foreground text-lg mb-8 max-w-md">
+          It seems there are no TV channels in your current playlists. You might want to check your playlist sources or add one that includes channels.
         </p>
         <Link href="/app/settings" passHref>
-          <Button>Go to Settings</Button>
+          <Button size="lg" variant="outline">Go to Settings</Button>
         </Link>
       </div>
     );
@@ -174,15 +194,30 @@ export default function ChannelsPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
         {!storeIsLoading && allChannels.length > 0 && (
-          <div className="relative sm:w-1/2 md:w-1/3">
-            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search channels..."
-              className="w-full pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="relative flex-grow sm:w-64 md:w-80">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search channels..."
+                className="w-full pl-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:w-auto">
+              <Label htmlFor="sort-channels" className="text-sm hidden sm:block">Sort by:</Label>
+              <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
+                <SelectTrigger id="sort-channels" className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default</SelectItem>
+                  <SelectItem value="title-asc">Title (A-Z)</SelectItem>
+                  <SelectItem value="title-desc">Title (Z-A)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
       </div>
@@ -190,9 +225,10 @@ export default function ChannelsPage() {
       {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
       
       {filteredChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
-        <div className="text-center py-10">
-          <Search className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <p className="text-muted-foreground">No channels found matching your search for "{debouncedSearchTerm}".</p>
+        <div className="text-center py-16 bg-card rounded-lg shadow-md">
+          <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
+          <p className="text-xl text-muted-foreground">No channels found matching your search for "{debouncedSearchTerm}".</p>
+          <Button variant="link" onClick={() => setSearchTerm('')} className="mt-4">Clear Search</Button>
         </div>
       )}
 
@@ -225,8 +261,9 @@ export default function ChannelsPage() {
         </section>
       ))}
        {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
-         <div className="text-center py-10">
-           <p className="text-muted-foreground">No channels to display with current filters.</p>
+         <div className="text-center py-16 bg-card rounded-lg shadow-md">
+           <Tv2 className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
+           <p className="text-xl text-muted-foreground">No channels to display with current filters.</p>
          </div>
        )}
     </div>
