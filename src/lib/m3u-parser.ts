@@ -10,12 +10,16 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
     const response = await fetch(cacheBustingUrl);
     if (!response.ok) {
       console.error(`Failed to fetch playlist ${playlistUrl}: ${response.status} ${response.statusText}`);
-      throw new Error(`Failed to fetch playlist (${response.status})`);
+      throw new Error(`Failed to fetch playlist (${response.status} ${response.statusText})`);
     }
     m3uString = await response.text();
   } catch (error: any) {
-    console.error(`Error fetching playlist ${playlistUrl}:`, error);
-    throw new Error(`Network error or invalid URL: ${error.message}`);
+    console.error(`Error fetching playlist ${playlistUrl}:`, error); // Logs the original error to the console
+    let detailedMessage = `Failed to fetch playlist from ${playlistUrl}. Reason: ${error.message}.`;
+    if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
+      detailedMessage += ' This can be due to network issues, an invalid URL, or Cross-Origin Resource Sharing (CORS) restrictions on the server. If running in a browser, check the developer console for more specific error details (e.g., CORS errors).';
+    }
+    throw new Error(detailedMessage); // Re-throw with a more informative message
   }
 
   const lines = m3uString.split(/\r?\n/);
@@ -43,8 +47,6 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       } else {
         // If no comma, the whole string after ':' might be attributes or just a duration.
         // For simplicity, assume if no comma, it might just be duration or title is missing.
-        // A more robust parser might handle this differently.
-        // We'll rely on tvg-name or parse the title from after attributes.
       }
       
       currentRawItem.title = extinfTitle; 
