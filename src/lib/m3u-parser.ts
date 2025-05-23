@@ -1,11 +1,12 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 10; // Limit for testing
+const MAX_ITEMS_PER_PLAYLIST = 100; // Limit for testing, increased from 10 to 100
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg', '.ts'];
-const SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+/i;
-const MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas'];
-const SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv'];
+const SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
+const MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados'];
+const SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes'];
+const CHANNEL_KEYWORDS_IN_GROUP = ['canais', 'tv ao vivo', 'live tv', 'iptv channels'];
 
 export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
   console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId}, Original URL: ${playlistUrl}. Max items: ${MAX_ITEMS_PER_PLAYLIST}`);
@@ -13,7 +14,7 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(playlistUrl)}`;
 
   try {
-    const response = await fetch(proxyApiUrl); // This is the response from *our* proxy.
+    const response = await fetch(proxyApiUrl); 
 
     if (!response.ok) {
       let proxyErrorDetails = 'Could not retrieve specific error details from proxy.';
@@ -123,34 +124,37 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         const finalTitle = (currentRawItem.title && currentRawItem.title.trim() !== '') ? currentRawItem.title.trim() : (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '' ? currentRawItem.tvgname.trim() : 'Untitled Item');
 
         const itemIndexInFile = items.length; 
-        let semanticPart = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || 'item';
+        let semanticPart = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         // --- Media Type Detection ---
-        let mediaType: MediaType = 'channel'; // Default to channel
-        const lowerGroupTitle = groupTitle?.toLowerCase() || '';
+        let mediaType: MediaType = 'channel'; // Default
+        const lowerGroupTitle = (groupTitle || '').toLowerCase();
         const lowerTitle = finalTitle.toLowerCase();
         const lowerStreamUrl = streamUrl.toLowerCase();
 
-        // 1. Check group title for explicit movie/series keywords
+        // 1. Check group title for explicit keywords
         if (MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'movie';
         } else if (SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'series';
+        } else if (CHANNEL_KEYWORDS_IN_GROUP.some(keyword => lowerGroupTitle.includes(keyword))) {
+          mediaType = 'channel';
         } else {
           // 2. If group title is not decisive, check stream URL for VOD extensions
           const isVODStream = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
           if (isVODStream) {
             // 3. If VOD, check title for series patterns
-            if (SERIES_PATTERN.test(finalTitle)) {
+            if (SERIES_PATTERN.test(finalTitle) || SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
               mediaType = 'series';
+            } else if (MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+              mediaType = 'movie';
             } else {
-              // If VOD and not a series by pattern, assume movie
-              // (could also be 'channel' if it's a VOD channel, but 'movie' is a safer bet for generic VOD files)
+              // If VOD and not series by pattern/keyword, and not movie by keyword, assume movie (could be single VOD content)
               mediaType = 'movie'; 
             }
           }
-          // If not VOD by extension and not movie/series by group, it remains 'channel'
+          // If not VOD by extension and not typed by group/title, it remains 'channel'
         }
         // --- End Media Type Detection ---
         
@@ -178,3 +182,4 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   console.log(`Parsed ${items.length} items (up to ${MAX_ITEMS_PER_PLAYLIST} max) from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
   return items;
 }
+
