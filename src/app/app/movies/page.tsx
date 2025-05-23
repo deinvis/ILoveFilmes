@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 
-const ITEMS_PER_GROUP_PREVIEW = 5;
+const ITEMS_PER_GROUP_PREVIEW = 4; // Changed from 5 to 4
 
 export default function MoviesPage() {
   const [isClient, setIsClient] = useState(false);
@@ -34,7 +34,7 @@ export default function MoviesPage() {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    if (isLoading) {
+    if (isLoading && mediaItems.length === 0) { // Only show progress if no items are yet displayed
       setProgressValue(10); 
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -50,7 +50,7 @@ export default function MoviesPage() {
         clearInterval(interval);
       }
     };
-  }, [isLoading, isClient]);
+  }, [isLoading, isClient, mediaItems]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -90,9 +90,9 @@ export default function MoviesPage() {
   if (!isClient || (isLoading && allMovies.length === 0)) {
     return (
       <div>
-        <h1 className="text-3xl font-bold mb-4 flex items-center"><Film className="mr-3 h-8 w-8 text-primary" /> Movies</h1>
+        <h1 className="text-3xl font-bold mb-2 flex items-center"><Film className="mr-3 h-8 w-8 text-primary" /> Movies</h1>
         {isClient && isLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
              <div key={index} className="flex flex-col space-y-3">
               <Skeleton className="h-[300px] w-full rounded-xl" />
@@ -166,7 +166,7 @@ export default function MoviesPage() {
         )}
       </div>
       
-      {isClient && isLoading && allMovies.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && isLoading && allMovies.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
       
       {filteredMovies.length === 0 && debouncedSearchTerm && !isLoading && (
         <div className="text-center py-10">
@@ -180,12 +180,12 @@ export default function MoviesPage() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold capitalize hover:underline">
               <Link href={`/app/group/movie/${encodeURIComponent(groupName)}`}>
-                {groupName}
+                {groupName} ({items.length})
               </Link>
             </h2>
             {items.length > ITEMS_PER_GROUP_PREVIEW && (
                <Link href={`/app/group/movie/${encodeURIComponent(groupName)}`} passHref>
-                <Button variant="link" className="text-sm">View All ({items.length})</Button>
+                <Button variant="link" className="text-sm">View All</Button>
               </Link>
             )}
           </div>
