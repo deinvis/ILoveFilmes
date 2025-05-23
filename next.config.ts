@@ -13,55 +13,13 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
+        hostname: '**', // Allow all HTTPS hostnames
         port: '',
         pathname: '/**',
       },
       {
         protocol: 'http',
-        hostname: 'placa17.xyz',
-        port: '', // Allows any port, including the implicit 80 for http
-        pathname: '/**',
-      },
-      {
-        protocol: 'http',
-        hostname: '97j91.xyz',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'newsodin.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'upload.wikimedia.org',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'blueantmedia.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'imagizer.imageshack.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'cinedigm.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'www.runtime.tv',
+        hostname: '**', // Allow all HTTP hostnames
         port: '',
         pathname: '/**',
       },
