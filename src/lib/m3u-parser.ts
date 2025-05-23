@@ -14,7 +14,8 @@ const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channel
 // Keywords for item titles (case-insensitive) - used as fallback or refinement
 const TITLE_MOVIE_KEYWORDS = ['movie', 'film', 'pelicula'];
 const TITLE_SERIES_KEYWORDS = ['series', 'serie', 'série', 'tvshow', 'season', 'episode', 'temporada', 'episodio', 'anime'];
-const TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ppv'];
+// 'ppv' is handled specially, so it's not in this general list
+const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal'];
 
 
 export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
@@ -146,9 +147,9 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         const lowerGroupTitle = (groupTitle || '').toLowerCase();
         const lowerTitle = finalTitle.toLowerCase();
         const lowerStreamUrl = streamUrl.toLowerCase();
-        const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext)); // .ts is NOT in VOD_EXTENSIONS here
+        const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
 
-        // New URL-based rules as per user request (highest priority)
+        // 1. Explicit URL rules (highest priority)
         if (lowerStreamUrl.endsWith('.ts')) {
           mediaType = 'channel';
         } else if (lowerStreamUrl.includes('series')) {
@@ -156,13 +157,13 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         } else if (lowerStreamUrl.includes('movies')) {
           mediaType = 'movie';
         } else {
-          // Fallback to existing refined logic if URL doesn't provide a clear type
-          mediaType = 'channel'; // Default to channel before applying refined logic below
+          // URL didn't give a definitive type, proceed to title/group based logic
 
-          if (TITLE_CHANNEL_KEYWORDS.some(keyword => keyword === 'ppv' && lowerTitle.includes('ppv'))) {
+          // 2. "PPV" in title (very high priority for channels)
+          if (lowerTitle.includes('ppv')) {
             mediaType = 'channel';
           }
-          // Group title checks
+          // 3. Group title keywords (next priority)
           else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
             mediaType = 'channel';
           } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
@@ -170,32 +171,29 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
             mediaType = 'series';
           }
-          // If group title wasn't decisive, check further
-          else {
-            if (isVODStreamByExtension) { // This is for non-.ts VOD streams
-              if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
-                mediaType = 'series';
-              } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
-                mediaType = 'movie';
-              } else {
-                mediaType = 'movie'; // Default VOD (non .ts) to movie
-              }
+          // 4. VOD stream by extension & specific title patterns (if group title wasn't decisive)
+          else if (isVODStreamByExtension) {
+            if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+              mediaType = 'series';
+            } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+              mediaType = 'movie';
             } else {
-              // Not a .ts, not a common VOD extension, URL rules didn't match, group title not decisive.
-              // Check title patterns for series/movie before final default to channel.
-              if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
-                 mediaType = 'series';
-              } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
-                 mediaType = 'movie';
-              } else if (TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword) && !lowerTitle.includes('ppv'))) {
-                 mediaType = 'channel';
-              } else {
-                 // If mediaType is still the initial default 'channel' from this else block's start, it remains 'channel'.
-              }
+              mediaType = 'movie'; // Default for VOD if no other indicators
             }
           }
+          // 5. General title keywords (if not VOD by extension and other checks failed)
+          else if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+            mediaType = 'series';
+          } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+            mediaType = 'movie';
+          } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+            mediaType = 'channel';
+          }
+          // 6. Final Default
+          else {
+            mediaType = 'channel';
+          }
         }
-
 
         const mediaItem: MediaItem = {
           id: itemId,
