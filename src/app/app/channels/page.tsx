@@ -1,20 +1,43 @@
+
 "use client";
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import { MediaCard } from '@/components/MediaCard';
 import { AlertTriangle, Tv2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 
 export default function ChannelsPage() {
   const { mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
+  const [progressValue, setProgressValue] = useState(10);
 
   useEffect(() => {
     fetchAndParsePlaylists();
   }, [fetchAndParsePlaylists]);
   
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+    if (isLoading) {
+      setProgressValue(10); // Reset to initial for animation
+      interval = setInterval(() => {
+        setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
+      }, 500);
+    } else {
+      if (interval) {
+        clearInterval(interval);
+      }
+      setProgressValue(100); // Set to 100 when not loading
+    }
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isLoading]);
+
   const channels = mediaItems.filter(item => item.type === 'channel');
 
   const groupedChannels = channels.reduce((acc, channel) => {
@@ -30,7 +53,8 @@ export default function ChannelsPage() {
   if (isLoading && channels.length === 0) {
     return (
       <div>
-        <h1 className="text-3xl font-bold mb-8 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+        <h1 className="text-3xl font-bold mb-4 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+        <Progress value={progressValue} className="w-full mb-8 h-2" />
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
