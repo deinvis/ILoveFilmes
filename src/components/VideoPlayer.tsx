@@ -9,15 +9,45 @@ interface VideoPlayerProps {
   item: MediaItem;
 }
 
+// Helper function to extract YouTube Video ID from various URL formats
+function getYouTubeVideoId(url: string): string | null {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2] && match[2].length === 11) ? match[2] : null;
+}
+
 export function VideoPlayer({ item }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const [isYouTube, setIsYouTube] = React.useState(false);
+  const [youTubeVideoId, setYouTubeVideoId] = React.useState<string | null>(null);
 
   useEffect(() => {
+    console.log(`VideoPlayer: Attempting to load item: "${item.title}", URL: "${item.streamUrl}"`);
+    const videoId = getYouTubeVideoId(item.streamUrl);
+    if (videoId) {
+      setIsYouTube(true);
+      setYouTubeVideoId(videoId);
+      // If it's a YouTube video, we don't need to set up HLS or the native video element
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      const videoElement = videoRef.current;
+      if (videoElement) {
+        videoElement.pause();
+        videoElement.removeAttribute('src');
+        videoElement.load();
+      }
+      return; // Skip HLS/HTML5 setup
+    }
+
+    // If not YouTube, reset YouTube states and proceed with HLS/HTML5
+    setIsYouTube(false);
+    setYouTubeVideoId(null);
     const videoElement = videoRef.current;
     if (!videoElement) return;
-
-    console.log(`VideoPlayer: Attempting to load item: "${item.title}", URL: "${item.streamUrl}"`);
 
     // Helper function to log MediaError details
     const logMediaError = (context: string, error: MediaError | null) => {
@@ -26,7 +56,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         if (error.message) {
           details += `, Message: ${error.message}`;
         }
-        // Expand on error codes
         switch (error.code) {
           case MediaError.MEDIA_ERR_ABORTED:
             details += ' (The fetching process for the media resource was aborted by the user.)';
@@ -42,8 +71,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             break;
           case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
             details += ' (The media resource specified by src was not suitable or the format is not supported.)';
-            // Use console.warn for this specific error to make it less prominent in Next.js error overlay
-            console.warn(`${context}: ${details}`, error);
+            console.warn(`${context}: ${details}`, error); // Warn for this common error
             break;
           default:
             details += ' (Unknown error code.)';
@@ -58,16 +86,13 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       console.log(`Attempting to play: ${sourceDescription} for URL: ${element.src || item.streamUrl}`);
       element.play().catch(error => {
         console.warn(`Autoplay was prevented for ${sourceDescription} (URL: ${element.src || item.streamUrl}):`, error.name, error.message);
-        // UI could be updated here to indicate user interaction is needed.
       });
     };
 
     const setupHlsPlayer = () => {
       if (Hls.isSupported()) {
         console.log("VideoPlayer: HLS.js is supported. Setting up HLS player for:", item.streamUrl);
-        const hls = new Hls({
-          // debug: true, // Enable for more detailed HLS.js logs if needed
-        });
+        const hls = new Hls();
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(videoElement);
@@ -83,31 +108,14 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 console.error('VideoPlayer HLS.js fatal network error:', data.details);
-                if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                   // Optionally retry manifest load
-                   // hls.loadSource(item.streamUrl); 
-                } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
-                    // Optionally retry fragment load
-                    // hls.startLoad(); 
-                } else {
-                   // Attempt to recover from other network errors
-                   hls.recoverMediaError();
-                }
+                hls.recoverMediaError();
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 console.error('VideoPlayer HLS.js fatal media error:', data.details);
-                if (data.details === 'bufferStalledError' || data.details === 'bufferNudgeOnStall') {
-                  console.warn('VideoPlayer HLS.js: Buffer issue, trying to recover.');
-                  hls.recoverMediaError();
-                } else {
-                   // Attempt to recover from other media errors
-                   hls.recoverMediaError(); 
-                }
+                hls.recoverMediaError(); 
                 break;
               default:
                 console.error('VideoPlayer HLS.js fatal error (other type):', data.type, data.details);
-                // Potentially destroy and re-initialize HLS on some unrecoverable errors
-                // hls.destroy();
                 break;
             }
           } else {
@@ -146,22 +154,20 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       });
     };
 
-    if (item.streamUrl) {
+    if (item.streamUrl && videoElement) { // Ensure videoElement exists
       videoElement.pause();
       videoElement.removeAttribute('src');
-      // Ensure any previous HLS instance is cleaned up before setting up a new one or a new src.
       if (hlsRef.current) {
         console.log("VideoPlayer: Destroying previous HLS instance.");
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      videoElement.load(); // Reset the media element
+      videoElement.load(); 
 
-      // Improved HLS stream detection
       const lowerStreamUrl = item.streamUrl.toLowerCase();
       const isHlsStream = lowerStreamUrl.includes('.m3u8') || 
-                          lowerStreamUrl.includes('/manifest') || // Common pattern for HLS/DASH manifests
-                          lowerStreamUrl.includes('.isml/manifest'); // Smooth Streaming that might serve HLS
+                          lowerStreamUrl.includes('/manifest') || 
+                          lowerStreamUrl.includes('.isml/manifest');
 
       if (isHlsStream) {
         setupHlsPlayer();
@@ -180,12 +186,25 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       if (videoElement) {
         videoElement.pause();
         videoElement.removeAttribute('src'); 
-        videoElement.load(); 
-        // Removing event listeners manually can be complex, relying on component unmount
-        // and re-mount for new `item` is often sufficient if dependencies are correct.
+        videoElement.load();
       }
     };
-  }, [item.streamUrl, item.id, item.title]); // Added item.title for logging convenience in useEffect
+  }, [item.streamUrl, item.id, item.title]); // item.id and item.title added for re-triggering effect on item change
+
+  if (isYouTube && youTubeVideoId) {
+    return (
+      <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl">
+        <iframe
+          src={`https://www.youtube.com/embed/${youTubeVideoId}`}
+          title={item.title || "YouTube video player"}
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          className="w-full h-full"
+        ></iframe>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl">
@@ -193,8 +212,8 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         ref={videoRef}
         controls
         className="w-full h-full"
-        playsInline // Important for iOS and inline playback
-        poster={item.posterUrl} // Display poster before video loads
+        playsInline 
+        poster={item.posterUrl} 
       >
         Your browser does not support the video tag or the video format.
       </video>
