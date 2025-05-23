@@ -2,7 +2,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
 import type { PlaylistItem, MediaItem } from '@/types';
 import { parseM3U } from '@/lib/m3u-parser';
 
@@ -20,6 +20,7 @@ const getLocalStorage = () => {
   if (typeof window !== 'undefined') {
     return localStorage;
   }
+  // Return a mock storage for SSR or environments where localStorage is not available
   return {
     getItem: () => null,
     setItem: () => {},
@@ -27,6 +28,16 @@ const getLocalStorage = () => {
   };
 };
 
+// Define the part of the state to persist
+type PersistentPlaylistState = Pick<PlaylistState, 'playlists'>;
+
+const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
+  name: 'streamverse-playlists-storage',
+  storage: createJSONStorage(() => getLocalStorage()),
+  partialize: (state) => ({
+    playlists: state.playlists, // Only persist the playlists array
+  }),
+};
 
 export const usePlaylistStore = create<PlaylistState>()(
   persist(
@@ -38,14 +49,12 @@ export const usePlaylistStore = create<PlaylistState>()(
       addPlaylist: async (url: string) => {
         if (get().playlists.some(p => p.url === url)) {
           set({ error: "Playlist URL already exists." });
-          // The UI component (PlaylistManager) will show a toast based on this error state
           return;
         }
-        set({ isLoading: true, error: null }); // Set loading true for the whole add operation
+        set({ isLoading: true, error: null }); 
         try {
-          // Basic naming, can be improved if playlist itself has a name (e.g. from X-TVG-URL header)
           const newPlaylist: PlaylistItem = {
-            id: `${Date.now().toString()}-${Math.random().toString(36).substring(2, 7)}`, // More unique ID
+            id: `${Date.now().toString()}-${Math.random().toString(36).substring(2, 7)}`,
             url,
             name: `Playlist ${get().playlists.length + 1}`, 
             addedAt: new Date().toISOString(),
@@ -53,10 +62,10 @@ export const usePlaylistStore = create<PlaylistState>()(
           set((state) => ({
             playlists: [...state.playlists, newPlaylist],
           }));
-          await get().fetchAndParsePlaylists(); // Reparse all playlists. This will set isLoading to false and handle its own errors.
+          // After adding, fetch and parse all playlists again.
+          // This will also update mediaItems and handle isLoading/error states internally.
+          await get().fetchAndParsePlaylists(); 
         } catch (e: any) { 
-          // This catch is primarily for unexpected errors during the playlist object creation/storage
-          // or if fetchAndParsePlaylists itself throws an unhandled error (though it should set its own error state).
           console.error("Error in addPlaylist process:", e);
           set({ isLoading: false, error: e.message || "Failed to add playlist." });
         }
@@ -64,15 +73,18 @@ export const usePlaylistStore = create<PlaylistState>()(
       removePlaylist: (id: string) => {
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
-          isLoading: true, // Set loading true for the re-parse operation
-          error: null,
         }));
-        get().fetchAndParsePlaylists(); // Reparse remaining playlists
+        // After removing, fetch and parse remaining playlists.
+        // This ensures mediaItems are updated.
+        set({ isLoading: true, error: null }); // Set loading for the re-parse
+        get().fetchAndParsePlaylists();
       },
       fetchAndParsePlaylists: async () => {
-        if (!get().isLoading) { // Ensure isLoading is true if called directly
+        // Ensure isLoading is true if called, unless it's already true.
+        if (!get().isLoading) { 
            set({ isLoading: true, error: null });
         }
+        
         const currentPlaylists = get().playlists;
         let allMediaItems: MediaItem[] = [];
         let encounteredErrors: string[] = [];
@@ -92,28 +104,27 @@ export const usePlaylistStore = create<PlaylistState>()(
               allMediaItems = [...allMediaItems, ...result.value];
             } else {
               const playlistUrl = currentPlaylists[index]?.url || 'Unknown URL';
-              console.error(`Failed to parse playlist ${playlistUrl}:`, result.reason);
-              // Use a more concise error message for the UI
+              const playlistName = currentPlaylists[index]?.name || playlistUrl.substring(0,30)+'...';
+              console.error(`Failed to parse playlist ${playlistName} (${playlistUrl}):`, result.reason);
               const reasonMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
-              encounteredErrors.push(`Error loading "${currentPlaylists[index]?.name || playlistUrl.substring(0,30)+'...'}": ${reasonMessage}`);
+              encounteredErrors.push(`Error loading "${playlistName}": ${reasonMessage}`);
             }
           });
           
+          // This set call is what was causing the quota error if mediaItems were persisted.
+          // Now, mediaItems is just an in-memory state.
           set({ 
             mediaItems: allMediaItems, 
             isLoading: false, 
             error: encounteredErrors.length > 0 ? encounteredErrors.join('; ') : null 
           });
 
-        } catch (e: any) { // Catch for truly unexpected errors in this function's logic
+        } catch (e: any) { 
           console.error("Unexpected error in fetchAndParsePlaylists:", e);
           set({ isLoading: false, error: e.message || "An unexpected error occurred while loading media items." });
         }
       },
     }),
-    {
-      name: 'streamverse-playlists-storage',
-      storage: createJSONStorage(() => getLocalStorage()),
-    }
+    persistOptions // Use the defined persistOptions
   )
 );
