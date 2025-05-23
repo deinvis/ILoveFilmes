@@ -26,8 +26,17 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Proxy: Failed to fetch ${decodedPlaylistUrl}: ${response.status} ${response.statusText}. Upstream error: ${errorText}`);
-      return NextResponse.json({ error: `Failed to fetch from upstream server (${response.status} ${response.statusText}). Details: ${errorText}` }, { status: response.status });
+      // Construct a clear status description, e.g., "429 Too Many Requests" or "500 Internal Server Error"
+      const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText : ''}`;
+      
+      // Construct the error message that will be sent in the JSON response body
+      let proxyGeneratedError = `Failed to fetch from upstream server (${upstreamStatusDescription}).`;
+      if (errorText && errorText.trim() !== '') {
+        proxyGeneratedError += ` Details: ${errorText.trim()}`;
+      }
+      
+      console.error(`Proxy: Failed to fetch ${decodedPlaylistUrl}: ${upstreamStatusDescription}. Upstream error body: ${errorText}`);
+      return NextResponse.json({ error: proxyGeneratedError }, { status: response.status });
     }
 
     const m3uString = await response.text();
