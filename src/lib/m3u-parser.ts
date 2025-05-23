@@ -5,9 +5,8 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   console.log(`Fetching and parsing M3U for playlist ID: ${playlistId}, URL: ${playlistUrl}`);
   let m3uString: string;
   try {
-    // Add a timestamp to try and bypass cache if needed, though server should handle caching.
-    const cacheBustingUrl = `${playlistUrl}${playlistUrl.includes('?') ? '&' : '?'}timestamp=${new Date().getTime()}`;
-    const response = await fetch(cacheBustingUrl);
+    // Removed cache-busting timestamp. Rely on server cache headers or assume no aggressive caching needed.
+    const response = await fetch(playlistUrl);
     if (!response.ok) {
       console.error(`Failed to fetch playlist ${playlistUrl}: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to fetch playlist (${response.status} ${response.statusText})`);
