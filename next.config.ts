@@ -47,6 +47,12 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'imagizer.imageshack.com',
+        port: '',
+        pathname: '/**',
+      },
     ],
   },
 };
