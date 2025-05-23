@@ -19,10 +19,8 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           proxyErrorDetails = `Proxy returned an unexpected JSON error format: ${JSON.stringify(errorData)}`;
         }
       } catch (e) {
-        // This means our proxy didn't send valid JSON, or there was another issue reading the error.
-        // Try to get plain text if JSON parsing failed.
         try {
-            const textError = await response.text(); // Attempt to read as text.
+            const textError = await response.text(); 
             if (textError && textError.trim() !== '') {
                 proxyErrorDetails = `Proxy response (non-JSON): ${textError.trim()}`;
             } else {
@@ -46,11 +44,9 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
     }
     m3uString = await response.text();
   } catch (error: any) {
-    if (error instanceof Error && error.message.startsWith('The playlist provider at')) {
-        // Re-throw the specific 429 error or other already processed error.
+    if (error instanceof Error && (error.message.startsWith('The playlist provider at') || error.message.startsWith('Failed to fetch playlist via proxy'))) {
         throw error;
     }
-    // Handle network errors to the proxy itself, or other unexpected errors during the fetch to the proxy.
     const networkOrProxyError = `Error connecting to the application's internal proxy service for ${playlistUrl}. Reason: ${error.message || 'Unknown fetch error'}.`;
     console.error(networkOrProxyError, error);
     throw new Error(networkOrProxyError);
@@ -64,7 +60,7 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
     const line = lines[i].trim();
 
     if (line.startsWith('#EXTM3U')) {
-      continue; // Standard M3U header
+      continue; 
     }
 
     if (line.startsWith('#EXTINF:')) {
@@ -102,8 +98,9 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         currentRawItem.groupTitle = currentRawItem.grouptitle;
       }
 
-    } else if (line && !line.startsWith('#')) {
-      if (currentRawItem.title || currentRawItem.tvgname) { 
+    } else if (line && !line.startsWith('#')) { // Stream URL line
+      // Only process if we have some info from a preceding #EXTINF line
+      if (Object.keys(currentRawItem).length > 1 || currentRawItem.title ) { // Check if currentRawItem has more than just originatingPlaylistId or has a title
         const streamUrl = line;
         const { 
           title = 'Untitled', 
@@ -111,13 +108,25 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           groupTitle, 
           tvgid, 
           tvgchno, 
-          originatingPlaylistId 
+          originatingPlaylistId // This is the playlistId passed to parseM3U
         } = currentRawItem;
 
         const finalTitle = (title && title.trim() !== '') ? title.trim() : (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '' ? currentRawItem.tvgname.trim() : 'Untitled Item');
 
-        const baseIdSource = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 50) || `item${items.length}`;
-        const itemId = `${originatingPlaylistId}-${baseIdSource}`;
+        // --- ID Generation START ---
+        // Use the index of the item within this specific M3U file to guarantee uniqueness for this file.
+        const itemIndexInFile = items.length; 
+
+        // Try to get a somewhat stable identifier from tvg-id, tvg-chno, or title.
+        let semanticPart = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30);
+        if (!semanticPart || semanticPart.trim() === '') {
+            semanticPart = 'item'; // Fallback if all else fails or results in empty string
+        }
+        
+        // Combine originating playlist ID (unique per playlist file added)
+        // with the semantic part and the item's index within that file.
+        const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
+        // --- ID Generation END ---
 
         let mediaType: MediaType = 'channel';
         const lowerGroupTitle = groupTitle?.toLowerCase() || '';
@@ -142,14 +151,14 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           posterUrl: finalPosterUrl,
           streamUrl: streamUrl,
           groupTitle: groupTitle,
-          genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined,
-          description: `Title: ${finalTitle}. Group: ${groupTitle || 'N/A'}.`,
+          genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined, // Assign groupTitle as genre for movies/series
+          description: `Title: ${finalTitle}. Group: ${groupTitle || 'N/A'}.`, // Basic description
         };
         items.push(mediaItem);
-        currentRawItem = {}; 
+        currentRawItem = {}; // Reset for the next #EXTINF
       }
     }
   }
-  console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (via proxy)`);
+  console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
   return items;
 }
