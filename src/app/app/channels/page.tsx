@@ -1,19 +1,22 @@
 
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import { MediaCard } from '@/components/MediaCard';
-import { AlertTriangle, Tv2 } from 'lucide-react';
+import { AlertTriangle, Tv2, Search } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
 
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
   const { playlists, mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
   const [progressValue, setProgressValue] = useState(10);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
 
   useEffect(() => {
     setIsClient(true);
@@ -30,7 +33,7 @@ export default function ChannelsPage() {
 
     let interval: NodeJS.Timeout | undefined;
     if (isLoading) {
-      setProgressValue(10); // Reset to initial for animation
+      setProgressValue(10); 
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
       }, 500);
@@ -38,7 +41,7 @@ export default function ChannelsPage() {
       if (interval) {
         clearInterval(interval);
       }
-      setProgressValue(100); // Set to 100 when not loading
+      setProgressValue(100); 
     }
     return () => {
       if (interval) {
@@ -47,19 +50,41 @@ export default function ChannelsPage() {
     };
   }, [isLoading, isClient]);
 
-  const channels = mediaItems.filter(item => item.type === 'channel');
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300); // 300ms delay
 
-  const groupedChannels = channels.reduce((acc, channel) => {
-    const group = channel.groupTitle || 'Uncategorized';
-    if (!acc[group]) {
-      acc[group] = [];
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchTerm]);
+
+  const allChannels = useMemo(() => mediaItems.filter(item => item.type === 'channel'), [mediaItems]);
+
+  const filteredChannels = useMemo(() => {
+    if (!debouncedSearchTerm) {
+      return allChannels;
     }
-    acc[group].push(channel);
-    return acc;
-  }, {} as Record<string, typeof channels>);
+    return allChannels.filter(channel => 
+      channel.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+      (channel.groupTitle && channel.groupTitle.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
+    );
+  }, [allChannels, debouncedSearchTerm]);
+
+  const groupedChannels = useMemo(() => {
+    return filteredChannels.reduce((acc, channel) => {
+      const group = channel.groupTitle || 'Uncategorized';
+      if (!acc[group]) {
+        acc[group] = [];
+      }
+      acc[group].push(channel);
+      return acc;
+    }, {} as Record<string, typeof filteredChannels>);
+  }, [filteredChannels]);
 
 
-  if (!isClient || (isLoading && channels.length === 0)) {
+  if (!isClient || (isLoading && allChannels.length === 0)) {
     return (
       <div>
         <h1 className="text-3xl font-bold mb-4 flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
@@ -85,7 +110,7 @@ export default function ChannelsPage() {
         <AlertTriangle className="w-16 h-16 text-destructive mb-4" />
         <h2 className="text-2xl font-semibold mb-2">Error Loading Channels</h2>
         <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={() => fetchAndParsePlaylists()}>Try Again</Button>
+        <Button onClick={() => fetchAndParsePlaylists(true)}>Try Again</Button>
       </div>
     );
   }
@@ -105,7 +130,7 @@ export default function ChannelsPage() {
     );
   }
 
-  if (mediaItems.length > 0 && channels.length === 0 && !isLoading) {
+  if (mediaItems.length > 0 && allChannels.length === 0 && !isLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Tv2 className="w-16 h-16 text-muted-foreground mb-4" />
@@ -121,9 +146,32 @@ export default function ChannelsPage() {
   }
 
   return (
-    <div className="space-y-10">
-      <h1 className="text-3xl font-bold flex items-center mb-4"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
-      {isClient && isLoading && channels.length > 0 && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
+        {!isLoading && allChannels.length > 0 && (
+          <div className="relative sm:w-1/2 md:w-1/3">
+            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search channels..."
+              className="w-full pl-10"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+
+      {isClient && isLoading && allChannels.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      
+      {filteredChannels.length === 0 && debouncedSearchTerm && !isLoading && (
+        <div className="text-center py-10">
+          <Search className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground">No channels found matching your search for "{debouncedSearchTerm}".</p>
+        </div>
+      )}
+
       {Object.entries(groupedChannels).map(([groupName, items]) => (
         <section key={groupName}>
           <h2 className="text-2xl font-semibold mb-6 capitalize">{groupName}</h2>
@@ -134,9 +182,10 @@ export default function ChannelsPage() {
           </div>
         </section>
       ))}
-       {channels.length === 0 && !isLoading && (
+       {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !isLoading && (
          <div className="text-center py-10">
-           <p className="text-muted-foreground">No channels found in the current playlists.</p>
+           {/* This case should ideally be covered by "No Channels Found" or specific loading error */}
+           <p className="text-muted-foreground">No channels to display.</p>
          </div>
        )}
     </div>
