@@ -1,10 +1,9 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 100; // Limit for testing, increased from 10 to 100
+const MAX_ITEMS_PER_PLAYLIST = 100; 
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg', '.ts'];
 const SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
-// Keywords are converted to lowercase for matching
 const MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados'];
 const SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes'];
 const CHANNEL_KEYWORDS_IN_GROUP = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal'];
@@ -41,13 +40,14 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       }
 
       let finalDetailedErrorMessage: string;
-      const statusTextDisplay = response.statusText ? ` ${response.statusText.trim()}` : '';
-      const upstreamStatusDescription = `${response.status}${statusTextDisplay}`;
-
+      const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
 
       if (response.status === 429) {
         finalDetailedErrorMessage = `The playlist provider at "${playlistUrl}" is rate-limiting requests (HTTP 429 Too Many Requests). This means you've tried to load it too many times in a short period. Please wait a while and try again later. (Proxy message: ${proxyErrorDetails})`;
-      } else {
+      } else if (response.status === 503) {
+        finalDetailedErrorMessage = `The playlist provider at "${playlistUrl}" is currently unavailable (HTTP 503 Service Unavailable). This usually means the external server is temporarily down or overloaded. Please try again later. (Proxy details: ${proxyErrorDetails})`;
+      }
+       else {
         finalDetailedErrorMessage = `Failed to fetch playlist via proxy (${upstreamStatusDescription}). Details from proxy: ${proxyErrorDetails}. Original URL: ${playlistUrl}`;
       }
       console.error(finalDetailedErrorMessage);
@@ -102,7 +102,6 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         currentRawItem[key] = value;
       }
 
-      // Prioritize tvg-name for title if available, otherwise use the parsed extinfTitle
       if (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '') {
         currentRawItem.title = currentRawItem.tvgname.trim();
       } else if (currentRawItem.title && currentRawItem.title.trim() !== '') {
@@ -119,25 +118,24 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         currentRawItem.groupTitle = currentRawItem.grouptitle;
       }
 
-    } else if (line && !line.startsWith('#')) { // Stream URL line
-      if (currentRawItem.title ) { // Ensure title is present
+    } else if (line && !line.startsWith('#')) { 
+      if (currentRawItem.title ) { 
         const streamUrl = line;
         const { 
-          posterUrl, // This will be currentRawItem.tvglogo or undefined
+          posterUrl, 
           groupTitle, 
           tvgid, 
           tvgchno, 
           originatingPlaylistId
         } = currentRawItem;
 
-        const finalTitle = currentRawItem.title; // Already processed and cleaned
+        const finalTitle = currentRawItem.title; 
 
         const itemIndexInFile = items.length; 
         let semanticPart = tvgid || tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
-        // --- Media Type Detection (Refined) ---
-        let mediaType: MediaType = 'channel'; // Default to channel
+        let mediaType: MediaType = 'channel'; 
         const lowerGroupTitle = (groupTitle || '').toLowerCase();
         const lowerTitle = finalTitle.toLowerCase();
         const lowerStreamUrl = streamUrl.toLowerCase();
@@ -149,40 +147,32 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         } else if (SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'series';
         } else {
-          // Group title is not decisive. Analyze stream URL and title.
           const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
 
           if (isVODStreamByExtension) {
-            // This is likely VOD content (movie or series)
             if (SERIES_PATTERN.test(finalTitle) || SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
               mediaType = 'series';
             } else if (MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
               mediaType = 'movie';
             } else {
-              // If VOD by extension, and not clearly series or movie by title keywords,
-              // default to movie for single VOD files.
               mediaType = 'movie';
             }
           } else {
-            // Not VOD by extension, and group title wasn't decisive.
-            // It's more likely to be a channel (live stream).
-            // Check title for VOD keywords as a fallback for miscategorized VOD without extensions
             if (SERIES_PATTERN.test(finalTitle) || SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
                mediaType = 'series';
             } else if (MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
                mediaType = 'movie';
             } else {
-               mediaType = 'channel'; // Default if no other VOD indicators
+               mediaType = 'channel'; 
             }
           }
         }
-        // --- End Media Type Detection ---
         
         const mediaItem: MediaItem = {
           id: itemId,
           type: mediaType,
           title: finalTitle,
-          posterUrl: posterUrl, // Will be currentRawItem.tvglogo or undefined
+          posterUrl: posterUrl, 
           streamUrl: streamUrl,
           groupTitle: groupTitle,
           genre: (mediaType === 'movie' || mediaType === 'series') && groupTitle ? groupTitle : undefined,
@@ -196,3 +186,4 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   console.log(`Parsed ${items.length} items (up to ${MAX_ITEMS_PER_PLAYLIST} max) from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
   return items;
 }
+
