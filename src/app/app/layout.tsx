@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from 'next/link';
@@ -18,7 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'; // Updated import
 import React from 'react';
 
 const navItems = [
@@ -85,12 +86,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0">
-                <SidebarHeader className="p-4 border-b">
+                <MobileSheetHeader className="p-4 border-b">
                    <Link href="/app/channels" className="flex items-center gap-2" onClick={() => setIsMobileSheetOpen(false)}>
                       <PlaySquare className="h-8 w-8 text-primary" />
-                      <h1 className="text-xl font-bold">StreamVerse</h1>
+                      <SheetTitle className="text-xl font-bold">StreamVerse</SheetTitle>
                     </Link>
-                </SidebarHeader>
+                </MobileSheetHeader>
                 <nav className="grid gap-2 text-lg font-medium p-4">
                   <NavLinks isMobile />
                 </nav>
