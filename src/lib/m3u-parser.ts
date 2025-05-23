@@ -1,8 +1,10 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
+const MAX_ITEMS_PER_PLAYLIST = 10; // Limit for testing
+
 export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
-  console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId}, Original URL: ${playlistUrl}`);
+  console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId}, Original URL: ${playlistUrl}. Max items: ${MAX_ITEMS_PER_PLAYLIST}`);
   let m3uString: string;
   const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(playlistUrl)}`;
 
@@ -57,6 +59,11 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
   let currentRawItem: Record<string, any> = {};
 
   for (let i = 0; i < lines.length; i++) {
+    if (items.length >= MAX_ITEMS_PER_PLAYLIST) {
+      console.log(`Reached MAX_ITEMS_PER_PLAYLIST (${MAX_ITEMS_PER_PLAYLIST}) for playlist ID: ${playlistId}. Stopping parse for this playlist.`);
+      break;
+    }
+
     const line = lines[i].trim();
 
     if (line.startsWith('#EXTM3U')) {
@@ -159,6 +166,7 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       }
     }
   }
-  console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
+  console.log(`Parsed ${items.length} items (up to ${MAX_ITEMS_PER_PLAYLIST} max) from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
   return items;
 }
+
