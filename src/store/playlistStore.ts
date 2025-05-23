@@ -211,17 +211,11 @@ export const usePlaylistStore = create<PlaylistState>()(
             throw new Error(`Failed to fetch EPG from ${epgUrl} via proxy (${upstreamStatusDescription}). Proxy: ${proxyErrorDetails}`);
           }
           
-          const contentType = response.headers.get('content-type');
-          if (contentType && !(contentType.includes('xml') || contentType.includes('application/octet-stream'))) {
-            const errorDetail = `EPG source at ${epgUrl} did not return XML data. Received content type: ${contentType}. Please ensure the URL points to a valid XMLTV file.`;
-            console.warn(errorDetail);
-            throw new Error(errorDetail);
-          }
-          
           const xmlString = await response.text();
-          if (!xmlString.trim().startsWith('<')) { // Basic check if it even looks like XML
-             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML (does not start with '<'). Please check the EPG URL.`;
-             console.warn(errorDetail + " Content received: " + xmlString.substring(0,100) + "...");
+          // Basic check: does it look like XML?
+          if (!xmlString.trim().startsWith('<')) { 
+             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML (does not start with '<'). Please check the EPG URL. Content received: ${xmlString.substring(0,100)}...`;
+             console.warn(errorDetail);
              throw new Error(errorDetail);
           }
 
