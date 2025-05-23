@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 
+const ITEMS_PER_GROUP_PREVIEW = 5;
+
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
   const { playlists, mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
@@ -174,9 +176,20 @@ export default function ChannelsPage() {
 
       {Object.entries(groupedChannels).map(([groupName, items]) => (
         <section key={groupName}>
-          <h2 className="text-2xl font-semibold mb-6 capitalize">{groupName}</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-semibold capitalize hover:underline">
+              <Link href={`/app/group/channel/${encodeURIComponent(groupName)}`}>
+                {groupName}
+              </Link>
+            </h2>
+            {items.length > ITEMS_PER_GROUP_PREVIEW && (
+              <Link href={`/app/group/channel/${encodeURIComponent(groupName)}`} passHref>
+                <Button variant="link" className="text-sm">View All ({items.length})</Button>
+              </Link>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {items.map(item => (
+            {items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => (
               <MediaCard key={item.id} item={item} />
             ))}
           </div>
@@ -184,8 +197,7 @@ export default function ChannelsPage() {
       ))}
        {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !isLoading && (
          <div className="text-center py-10">
-           {/* This case should ideally be covered by "No Channels Found" or specific loading error */}
-           <p className="text-muted-foreground">No channels to display.</p>
+           <p className="text-muted-foreground">No channels to display with current filters.</p>
          </div>
        )}
     </div>
