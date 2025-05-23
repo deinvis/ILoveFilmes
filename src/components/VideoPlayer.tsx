@@ -28,20 +28,25 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         switch (error.code) {
           case MediaError.MEDIA_ERR_ABORTED:
             details += ' (The fetching process for the media resource was aborted by the user.)';
+            console.error(`${context}: ${details}`, error);
             break;
           case MediaError.MEDIA_ERR_NETWORK:
             details += ' (A network error occurred while fetching the media resource.)';
+            console.error(`${context}: ${details}`, error);
             break;
           case MediaError.MEDIA_ERR_DECODE:
             details += ' (An error occurred while decoding the media resource, possibly due to corruption or unsupported codecs.)';
+            console.error(`${context}: ${details}`, error);
             break;
           case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
             details += ' (The media resource specified by src was not suitable or the format is not supported.)';
+            // Use console.warn for this specific error to make it less prominent in Next.js error overlay
+            console.warn(`${context}: ${details}`, error);
             break;
           default:
             details += ' (Unknown error code.)';
+            console.error(`${context}: ${details}`, error);
         }
-        console.error(`${context}: ${details}`, error);
       } else {
         console.error(`${context}: An unknown error occurred with the video element.`);
       }
@@ -59,13 +64,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       if (Hls.isSupported()) {
         console.log("HLS.js is supported. Setting up HLS player for:", item.streamUrl);
         const hls = new Hls({
-          // Example: Enable detailed logging from HLS.js
           // debug: true, 
-          // Example: Start loading 5 seconds from the live edge
-          // liveSyncDurationCount: 3, 
-          // liveMaxLatencyDurationCount: 5,
-          // Example: Increase buffer to potentially help with stalling
-          // maxBufferLength: 60, // seconds
         });
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
@@ -82,11 +81,10 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 console.error('HLS.js fatal network error:', data.details);
-                // Attempt to recover from manifest load errors
                 if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                   hls.loadSource(item.streamUrl); // Retry loading manifest
+                   hls.loadSource(item.streamUrl); 
                 } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
-                    hls.startLoad(); // Retry loading fragment
+                    hls.startLoad(); 
                 } else {
                    hls.recoverMediaError();
                 }
@@ -97,13 +95,11 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
                   console.warn('HLS.js: Buffer issue, trying to recover.');
                   hls.recoverMediaError();
                 } else {
-                   hls.recoverMediaError(); // General recovery attempt
+                   hls.recoverMediaError(); 
                 }
                 break;
               default:
                 console.error('HLS.js fatal error (other):', data);
-                // Consider destroying and re-initializing HLS on certain unrecoverable errors
-                // hls.destroy(); hlsRef.current = null; // Potentially setupHlsPlayer() again or fallback
                 break;
             }
           } else {
@@ -121,17 +117,21 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             logMediaError('Native HLS video element error', videoElement.error);
         });
       } else {
-        console.warn("HLS.js is not supported, and native HLS playback is not available. Falling back to direct src for:", item.streamUrl);
+        // This case should ideally not be reached if HLS.isSupported() or native HLS is available.
+        // If it is, it means the stream is HLS but cannot be played by either method.
+        // For non-HLS streams, setupDefaultPlayer will be called directly.
+        console.warn("HLS.js is not supported, and native HLS playback is not available for this HLS stream. Playback may fail:", item.streamUrl);
+        // Fallback to setting src directly, though it's unlikely to work for HLS if HLS.js/native support failed.
         videoElement.src = item.streamUrl; 
-        tryPlay(videoElement, "Direct SRC fallback");
+        tryPlay(videoElement, "Direct SRC fallback for HLS (unlikely to work)");
          videoElement.addEventListener('error', () => {
-            logMediaError('Direct SRC fallback video element error', videoElement.error);
+            logMediaError('Direct SRC fallback HLS video element error', videoElement.error);
         });
       }
     };
 
     const setupDefaultPlayer = () => {
-      console.log("Setting up default player for:", item.streamUrl);
+      console.log("Setting up default player for non-HLS stream:", item.streamUrl);
       videoElement.src = item.streamUrl;
       videoElement.addEventListener('loadedmetadata', () => {
           console.log("Default Player: Metadata loaded.");
@@ -153,7 +153,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         hlsRef.current = null;
       }
 
-      // More robust M3U8 check
       const isHlsStream = item.streamUrl.includes('.m3u8') || 
                           item.streamUrl.includes('/manifest') || 
                           item.streamUrl.includes('.isml/manifest');
@@ -174,16 +173,16 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       }
       if (videoElement) {
         videoElement.pause();
-        videoElement.removeAttribute('src'); // Important to remove src to stop download/streaming
-        videoElement.load(); // Resets the media element
-         // Remove all manually added listeners to avoid memory leaks if component re-renders without full unmount/mount
-        const newVideoElement = videoElement.cloneNode(true) as HTMLVideoElement;
-        videoElement.parentNode?.replaceChild(newVideoElement, videoElement);
-        // videoRef.current = newVideoElement; // This line would break the ref if we re-assign it here.
-                                            // Instead, the effect's dependencies should ensure it re-runs correctly for a new item.
+        videoElement.removeAttribute('src'); 
+        videoElement.load(); 
+        // Cloning to remove listeners is a common pattern, but ensure videoRef.current is updated if needed,
+        // or rely on the effect's dependencies to re-run and re-attach listeners to the original ref.
+        // For simplicity and given the current structure, this explicit removal might be excessive
+        // if the effect correctly cleans up and re-initializes for new `item` prop.
+        // const newVideoElement = videoElement.cloneNode(true) as HTMLVideoElement;
+        // videoElement.parentNode?.replaceChild(newVideoElement, videoElement);
       }
     };
-  // Adding item.id ensures the effect re-runs if the item changes, even if streamUrl is the same (less likely but good practice)
   }, [item.streamUrl, item.id]); 
 
   return (
