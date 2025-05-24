@@ -2,31 +2,27 @@
 import type { MediaItem, MediaType } from '@/types';
 import { extractChannelInfo } from '@/lib/channel-name-utils';
 
-const MAX_ITEMS_PER_PLAYLIST = 1500;
+const MAX_ITEMS_PER_PLAYLIST = 5000; // Reverted to 5000 as per earlier user request, adjust if needed
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 
 // Keywords for URL-based categorization (highest priority)
 const URL_STREAM_IS_CHANNEL_EXT = ['.ts'];
+// Removed anime specific URL keywords
 const URL_SERIES_KEYWORDS = ['/series/'];
 const URL_MOVIE_KEYWORDS = ['/movies/', '/movie/'];
 
 // Keywords for title-based categorization (second priority)
 const TITLE_PPV_KEYWORDS = ['ppv'];
 
-// Keywords for anime detection (high priority after channel/ppv specific URL/title checks)
-const ANIME_GROUP_KEYWORDS = ['anime', 'animes', 'desenhos japoneses', 'animação japonesa'];
-const ANIME_TITLE_KEYWORDS = ['anime', 'animes'];
-
-
 // Keywords for group-title based categorization (third priority)
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados', 'lançamentos'];
-const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados']; // Exclude anime here
+const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados'];
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal', 'esportes', 'noticias', 'infantil', 'documentarios', 'adulto'];
 
 // Keywords for title-based VOD categorization (fourth priority, if stream is VOD)
 const TITLE_SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 const TITLE_MOVIE_KEYWORDS_GENERAL = ['movie', 'film', 'pelicula'];
-const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow']; // Exclude anime here
+const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow'];
 
 // General keywords for title-based categorization (fifth priority)
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ao vivo'];
@@ -127,7 +123,7 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         const lowerStreamUrl = streamUrl.toLowerCase();
         const lowerFullTitle = fullTitle.toLowerCase();
         const lowerGroupTitle = (grouptitle || '').toLowerCase();
-        const lowerTvGenre = (tvggenre || '').toLowerCase();
+        // const lowerTvGenre = (tvggenre || '').toLowerCase(); // Not used in anime removal
 
         const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
 
@@ -137,19 +133,14 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         } else if (TITLE_PPV_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
             mediaType = 'channel';
         } else if (URL_SERIES_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
-            mediaType = 'series'; // Could be anime, will refine below
+            mediaType = 'series';
         } else if (URL_MOVIE_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
-            mediaType = 'movie'; // Could be anime, will refine below
+            mediaType = 'movie';
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          // At this point, it's not definitively a channel by URL or PPV title or group
-          // Now check for Anime before general movie/series
-          if (ANIME_GROUP_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ||
-              ANIME_TITLE_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword)) ||
-              ANIME_GROUP_KEYWORDS.some(keyword => lowerTvGenre.includes(keyword))) {
-            mediaType = 'anime';
-          } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+          // No anime detection here anymore
+          if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
             mediaType = 'series';
           } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
             mediaType = 'movie';
@@ -171,12 +162,10 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         }
 
         let finalGenre: string | undefined = undefined;
-        // Assign genre for VOD types (movie, series, anime)
-        if (mediaType === 'movie' || mediaType === 'series' || mediaType === 'anime') {
+        if (mediaType === 'movie' || mediaType === 'series') { // Removed anime
             if (tvggenre && tvggenre.trim() !== '') {
                 finalGenre = tvggenre.trim();
             } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ) {
-                // Use grouptitle as genre if it's not clearly a channel group
                 finalGenre = grouptitle.trim();
             }
         }
@@ -190,9 +179,9 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
           qualityTag: qualityTag,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: grouptitle, // Store the raw group-title from M3U
+          groupTitle: grouptitle,
           tvgId: tvgId,
-          genre: finalGenre, // This will be tvg-genre or group-title (for VOD)
+          genre: finalGenre,
           description: currentRawItem.description || `Título: ${fullTitle}. Grupo: ${grouptitle || 'N/A'}. Tipo: ${mediaType}. Qualidade: ${qualityTag || 'N/A'}.`,
           originatingPlaylistId: itemOriginatingPlaylistId,
           originatingPlaylistName: itemOriginatingPlaylistName,
@@ -219,14 +208,13 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
 
     if (!response.ok) {
         try {
-            const errorData = await response.json(); // Try to parse as JSON first
+            const errorData = await response.json(); 
             if (errorData && typeof errorData.error === 'string') {
                  proxyErrorDetails = errorData.error;
-            } else if (errorData) { // If it's JSON but not the expected format
+            } else if (errorData) { 
                 proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
             }
         } catch (e) {
-            // If parsing JSON fails, try to read as text
             try {
                 const textError = await response.text();
                 if (textError && textError.trim() !== '') {
@@ -239,7 +227,7 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
       
       let finalDetailedErrorMessage: string;
       if (response.status === 429) {
-        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
+        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Proxy message: ${proxyErrorDetails})`;
         console.warn(finalDetailedErrorMessage);
       } else if (response.status === 503) {
          finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está atualmente indisponível (HTTP 503 Service Unavailable). Isso geralmente significa que o servidor externo está temporariamente fora do ar ou sobrecarregado. Por favor, tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
@@ -253,9 +241,8 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
     m3uString = await response.text();
   } catch (error: any) {
     if (error instanceof Error && (error.message.includes('O provedor da playlist em') || error.message.includes('Falha ao buscar playlist via proxy'))) {
-        throw error; // Re-throw specific, already detailed errors
+        throw error; 
     }
-    // Generic network or proxy internal error
     const networkOrProxyError = `Erro ao conectar ao serviço de proxy interno da aplicação para ${playlistUrl}. Razão: ${error.message || 'Erro de fetch desconhecido'}. Verifique sua conexão de rede e se o proxy da aplicação está funcionando.`;
     console.error(networkOrProxyError, error);
     throw new Error(networkOrProxyError);

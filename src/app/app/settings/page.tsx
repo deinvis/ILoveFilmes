@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
-import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle, ShieldCheck, Tv2 } from 'lucide-react';
+import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle, ShieldCheck, Tv2, Film, Clapperboard } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +31,6 @@ const startPageOptions: { value: StartPagePath, label: string, icon: React.Eleme
   { value: '/app/channels', label: 'Canais', icon: Tv2 },
   { value: '/app/movies', label: 'Filmes', icon: Film },
   { value: '/app/series', label: 'Séries', icon: Clapperboard },
-  { value: '/app/animes', label: 'Animes', icon: Tv2 }, // Using Tv2 for animes
   { value: '/app/favorites', label: 'Favoritos', icon: Heart },
   { value: '/app/recent', label: 'Recentes', icon: History },
 ];
@@ -255,4 +254,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

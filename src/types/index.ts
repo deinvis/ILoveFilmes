@@ -1,6 +1,6 @@
 
-export type MediaType = 'channel' | 'movie' | 'series' | 'anime';
-export type StartPagePath = '/app/channels' | '/app/movies' | '/app/series' | '/app/favorites' | '/app/recent' | '/app/animes';
+export type MediaType = 'channel' | 'movie' | 'series';
+export type StartPagePath = '/app/channels' | '/app/movies' | '/app/series' | '/app/favorites' | '/app/recent';
 
 export type PlaylistType = 'm3u' | 'xc';
 
@@ -79,4 +79,3 @@ export interface XCAPIResponse {
     [key: string]: any;
   };
 }
-

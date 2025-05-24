@@ -21,21 +21,21 @@ const MEDIA_TYPE_ICONS: Record<MediaType, React.ElementType> = {
   channel: Tv2,
   movie: Film,
   series: Clapperboard,
-  anime: Tv2, // Using Tv2 icon for Anime
+  // anime: Tv2, // Removed anime
 };
 
 const MEDIA_TYPE_PATHS: Record<MediaType, string> = {
     channel: '/app/channels',
     movie: '/app/movies',
     series: '/app/series',
-    anime: '/app/animes',
+    // anime: '/app/animes', // Removed anime
 };
 
 const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
   channel: 'canais',
   movie: 'filmes',
   series: 'séries',
-  anime: 'animes',
+  // anime: 'animes', // Removed anime
 };
 
 
@@ -66,6 +66,7 @@ export default function GroupPage() {
   const mediaType = rawMediaType as MediaType;
   
   const { displayName: pageDisplayGroupName, normalizedKey: pageNormalizedGroupNameKey } = useMemo(() => {
+    // Pass mediaType to processGroupName when processing group name from URL
     return processGroupName(rawGroupNameFromUrl ? decodeURIComponent(rawGroupNameFromUrl) : 'UNCATEGORIZED', mediaType);
   }, [rawGroupNameFromUrl, mediaType]);
 
@@ -78,6 +79,7 @@ export default function GroupPage() {
     if (!mediaType || !pageNormalizedGroupNameKey) return [];
     let items = allMediaItemsFromStore.filter(item => {
       const itemRawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'UNCATEGORIZED';
+      // Pass item.type to processGroupName
       const { normalizedKey: itemNormalizedKey } = processGroupName(itemRawGroup, item.type);
       return item.type === mediaType && itemNormalizedKey === pageNormalizedGroupNameKey;
     });
@@ -85,7 +87,6 @@ export default function GroupPage() {
     return items;
   }, [allMediaItemsFromStore, mediaType, pageNormalizedGroupNameKey, parentalControlEnabled]);
 
-  // This map is used for channel variant selection in MediaCard
   const logicalChannelVariantsMap = useMemo(() => {
     if (mediaType !== 'channel') return new Map<string, MediaItem[]>();
     const map = new Map<string, MediaItem[]>();
@@ -105,10 +106,8 @@ export default function GroupPage() {
 
   const logicalGroupItems = useMemo(() => {
     if (mediaType === 'channel') {
-        // For channels, we want to display one card per baseName (logical channel)
         return Array.from(logicalChannelVariantsMap.values()).map(variants => variants[0]).filter(Boolean) as MediaItem[];
     }
-    // For movies, series, and animes, each item is its own logical item for this page
     return rawGroupItems;
   }, [rawGroupItems, mediaType, logicalChannelVariantsMap]);
 
@@ -162,9 +161,9 @@ export default function GroupPage() {
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentItemsToDisplay = filteredLogicalGroupItems.slice(startIndex, endIndex);
 
-  const PageIcon = MEDIA_TYPE_ICONS[mediaType] || ListFilter;
-  const backPath = MEDIA_TYPE_PATHS[mediaType] || '/app';
-  const mediaTypeLabel = MEDIA_TYPE_LABELS[mediaType] || mediaType;
+  const PageIcon = mediaType ? MEDIA_TYPE_ICONS[mediaType] : ListFilter; // Added check for mediaType
+  const backPath = mediaType ? MEDIA_TYPE_PATHS[mediaType] : '/app'; // Added check for mediaType
+  const mediaTypeLabel = mediaType ? MEDIA_TYPE_LABELS[mediaType] : 'itens'; // Added check for mediaType
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (mediaType !== 'channel' || !tvgId || !epgData[tvgId] || epgLoading) return null;
@@ -212,7 +211,7 @@ export default function GroupPage() {
     );
   }
 
-  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series', 'anime'].includes(mediaType)) {
+  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series'].includes(mediaType)) { // Removed anime
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <XCircle className="w-20 h-20 text-destructive mb-6" />
@@ -250,7 +249,7 @@ export default function GroupPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center capitalize">
           <PageIcon className="mr-3 h-8 w-8 text-primary" />
-          {pageDisplayGroupName} ({mediaType === 'channel' ? 'Canais' : mediaType === 'movie' ? 'Filmes' : mediaType === 'series' ? 'Séries' : 'Animes'})
+          {pageDisplayGroupName} ({mediaType === 'channel' ? 'Canais' : mediaType === 'movie' ? 'Filmes' : 'Séries'})
         </h1>
          {logicalGroupItems.length > 0 && (
             <div className="relative sm:w-1/2 md:w-1/3">
@@ -322,4 +321,3 @@ export default function GroupPage() {
     </div>
   );
 }
-

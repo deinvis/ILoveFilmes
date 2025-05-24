@@ -38,7 +38,7 @@ const mainCategoryNavItems: NavItemConfig[] = [
   { value: 'channels', href: '/app/channels', label: 'Canais', icon: Tv2, mediaType: 'channel' },
   { value: 'movies', href: '/app/movies', label: 'Filmes', icon: Film, mediaType: 'movie' },
   { value: 'series', href: '/app/series', label: 'Séries', icon: Clapperboard, mediaType: 'series' },
-  { value: 'animes', href: '/app/animes', label: 'Animes', icon: Tv2, mediaType: 'anime' }, // Using Tv2 for Anime
+  // Removed Animes
 ];
 
 const staticNavItems: NavItemConfig[] = [
@@ -74,7 +74,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: [],
       movie: [],
       series: [],
-      anime: [], // Added anime
+      // anime: [], // Removed anime
     };
     if (!mediaItems || mediaItems.length === 0) return subs;
 
@@ -84,13 +84,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: new Set(),
       movie: new Set(),
       series: new Set(),
-      anime: new Set(), // Added anime
+      // anime: new Set(), // Removed anime
     };
 
     filteredMediaItemsForSidebar.forEach(item => {
-      if (item.type && uniqueNormalizedGroups[item.type]) {
+      if (item.type && uniqueNormalizedGroups[item.type]) { // Check if item.type is a valid key
         const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        // Pass mediaType to processGroupName
         const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup, item.type);
 
 
@@ -265,9 +264,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <PlaySquare className="h-8 w-8 text-primary" />
               </Link>
           </SidebarHeader>
-          <SidebarContent className="p-2">
+          <SidebarContent className="p-2 flex-grow overflow-y-auto">
             <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
-              <NavLinks closeMobileSheet={() => setIsMobileSheetOpen(false)} />
+              <NavLinks isMobile={false} closeMobileSheet={() => setIsMobileSheetOpen(false)} />
             </ClientSideOnlyRenderer>
           </SidebarContent>
           <SidebarFooter className="p-4 mt-auto group-data-[collapsible=icon]:hidden">
@@ -317,4 +316,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
-
