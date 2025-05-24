@@ -361,7 +361,7 @@ export function PlaylistManager() {
                     key={playlist.id}
                     className="flex items-center justify-between p-3 bg-card hover:bg-muted/50 rounded-md transition-colors"
                   >
-                    <div className="truncate flex-grow mr-2">
+                    <div className="truncate flex-grow mr-2 min-w-0"> {/* Added min-w-0 here */}
                       <p className="font-medium truncate text-sm" title={playlist.name || (playlist.type === 'm3u' ? (playlist.url || 'Arquivo M3U') : playlist.xcDns)}>
                         {playlist.name || (playlist.type === 'm3u' ? (playlist.url ? 'Playlist M3U Sem Nome' : `Arquivo: ${playlist.url || 'Desconhecido'}`) : 'Playlist XC Sem Nome')}
                       </p>
