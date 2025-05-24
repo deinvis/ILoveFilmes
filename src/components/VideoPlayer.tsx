@@ -28,7 +28,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   const { updatePlaybackProgress, getPlaybackProgress, addRecentlyPlayed } = usePlaylistStore();
 
-  const logMediaError = useCallback((context: string, error: MediaError | null) => {
+  const logMediaError = useCallback((context: string, error: MediaError | null, streamUrl?: string) => {
     let userFriendlyMessage = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
     if (error) {
       let details = `Error Code: ${error.code}`;
@@ -39,7 +39,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         case MediaError.MEDIA_ERR_ABORTED:
           details += ' (The fetching process for the media resource was aborted by the user.)';
           userFriendlyMessage = "A reprodução foi interrompida.";
-          console.warn(`${context}: ${details}`, error); // Aborted is often user-initiated
+          console.warn(`${context}: ${details}`, error);
           break;
         case MediaError.MEDIA_ERR_NETWORK:
           details += ' (A network error occurred while fetching the media resource.)';
@@ -54,7 +54,10 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
           details += ' (The media resource specified by src was not suitable or the format is not supported.)';
           userFriendlyMessage = "Formato de vídeo não suportado ou fonte inválida.";
-          console.warn(`${context}: ${details}`, error);
+          if (streamUrl && streamUrl.toLowerCase().endsWith('.ts')) {
+            userFriendlyMessage += " Streams .ts podem ter compatibilidade limitada no navegador. Verifique se há uma versão .m3u8 (HLS) disponível na sua playlist.";
+          }
+          console.warn(`${context}: ${details} (URL: ${streamUrl})`, error);
           break;
         default:
           details += ' (Unknown error code.)';
@@ -70,7 +73,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
     console.log(`VideoPlayer: Attempting to play: ${sourceDescription} for URL: ${element.src || item.streamUrl}`);
     element.play().catch(error => {
       console.warn(`VideoPlayer: Autoplay/play was prevented for ${sourceDescription} (URL: ${element.src || item.streamUrl}):`, error.name, error.message);
-      // Optionally set a player error here if autoplay failure should be user-visible
       // setPlayerError("Não foi possível iniciar a reprodução automaticamente. Clique no play.");
     });
   }, [item.streamUrl]);
@@ -86,20 +88,20 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   const setupVideoEventListeners = useCallback((videoElement: HTMLVideoElement) => {
     const onLoadedMetadata = () => {
-      console.log("VideoPlayer: Metadata loaded.");
-      setPlayerError(null); // Clear previous errors on successful metadata load
+      console.log("VideoPlayer: Metadata loaded for", item.streamUrl);
+      setPlayerError(null); 
       if (item.type === 'movie' || item.type === 'series') {
         const savedProgress = getPlaybackProgress(item.id);
-        if (savedProgress && videoElement.duration > 0 && videoElement.currentTime < savedProgress.currentTime) { 
+        if (savedProgress && videoElement.duration > 0 && videoElement.currentTime < savedProgress.currentTime && savedProgress.currentTime < videoElement.duration -1) { 
           console.log(`VideoPlayer: Resuming VOD item "${item.title}" from ${savedProgress.currentTime}s`);
           videoElement.currentTime = savedProgress.currentTime;
         }
       }
-      tryPlay(videoElement, "Video stream (loadedmetadata event)");
+      tryPlay(videoElement, `Video stream (loadedmetadata event): ${item.streamUrl}`);
     };
 
     const onError = () => {
-      logMediaError(`VideoPlayer Error for ${item.title} (${item.streamUrl})`, videoElement.error);
+      logMediaError(`VideoPlayer Error for ${item.title} (${item.streamUrl})`, videoElement.error, item.streamUrl);
     };
     
     videoElement.addEventListener('loadedmetadata', onLoadedMetadata);
@@ -120,7 +122,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   useEffect(() => {
     console.log(`VideoPlayer: Attempting to load item: "${item.title}", URL: "${item.streamUrl}"`);
-    setPlayerError(null); // Reset error when item changes
+    setPlayerError(null); 
     addRecentlyPlayed(item.id);
 
     const videoId = getYouTubeVideoId(item.streamUrl);
@@ -151,12 +153,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
     const setupHlsPlayer = () => {
       if (Hls.isSupported()) {
         console.log("VideoPlayer: HLS.js is supported. Setting up HLS player for:", item.streamUrl);
-        const hls = new Hls({
-            // Optional HLS.js config
-            // capLevelToPlayerSize: true,
-            // maxBufferSize: 30 * 1000 * 1000, // 30MB
-            // maxBufferLength: 30, // seconds
-        });
+        const hls = new Hls();
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
         hls.attachMedia(videoElement);
@@ -164,13 +161,13 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         cleanupVideoEvents = setupVideoEventListeners(videoElement); 
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          console.log("VideoPlayer HLS.js: Manifest parsed.");
-          setPlayerError(null); // Clear previous errors
-          tryPlay(videoElement, "HLS stream (manifest parsed event)");
+          console.log("VideoPlayer HLS.js: Manifest parsed for", item.streamUrl);
+          setPlayerError(null); 
+          tryPlay(videoElement, `HLS stream (manifest parsed event): ${item.streamUrl}`);
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
-          logMediaError(`HLS.js Error for ${item.title} - Event: ${event}, Details: ${data.details}`, videoElement.error); // Log raw HLS error
+          logMediaError(`HLS.js Error for ${item.title} - Event: ${event}, Details: ${data.details}`, videoElement.error, item.streamUrl); 
           let userFriendlyHlsError = "Erro ao carregar o stream de vídeo (HLS).";
           if (data.fatal) {
             switch (data.type) {
@@ -181,7 +178,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
                 } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
                      userFriendlyHlsError = "Erro ao carregar um segmento do vídeo HLS. A conexão pode estar instável ou o stream pode estar incompleto."
                 }
-                hls.startLoad(); // Attempt to recover network errors
+                hls.startLoad(); 
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 userFriendlyHlsError = `Erro de mídia no stream HLS: ${data.details}. O conteúdo pode estar corrompido ou em formato não suportado.`;
@@ -198,7 +195,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
              userFriendlyHlsError = `Problema no stream HLS: ${data.details}.`;
           }
           setPlayerError(userFriendlyHlsError);
-          console.error('HLS.js error:', event, data);
+          console.error('HLS.js error:', event, data, 'for URL:', item.streamUrl);
         });
       } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
         console.log("VideoPlayer: Native HLS playback is supported. Setting video src to:", item.streamUrl);
@@ -208,14 +205,13 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         const unsupportedMessage = "Seu navegador não suporta HLS.js nem reprodução nativa de HLS para este stream.";
         console.warn("VideoPlayer: HLS.js is not supported, and native HLS playback is not available for this HLS stream. Playback may fail:", item.streamUrl);
         setPlayerError(unsupportedMessage);
-        // Fallback to setting src directly, though it likely won't work
         videoElement.src = item.streamUrl; 
         cleanupVideoEvents = setupVideoEventListeners(videoElement);
       }
     };
 
     const setupDefaultPlayer = () => {
-      console.log("VideoPlayer: Setting up default HTML5 player for non-HLS stream:", item.streamUrl);
+      console.log(`VideoPlayer: Setting up default HTML5 player for non-HLS stream: "${item.streamUrl}" (Item: "${item.title}")`);
       videoElement.src = item.streamUrl;
       videoElement.preload = "auto"; 
       cleanupVideoEvents = setupVideoEventListeners(videoElement);
@@ -225,7 +221,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       videoElement.pause();
       videoElement.removeAttribute('src');
       if (hlsRef.current) {
-        console.log("VideoPlayer: Destroying previous HLS instance.");
+        console.log("VideoPlayer: Destroying previous HLS instance for new item:", item.title);
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
@@ -237,21 +233,21 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
                           lowerStreamUrl.includes('.isml/manifest');
 
       if (isHlsStream) {
-        console.log(`VideoPlayer: Detected HLS stream for ${item.title}`);
+        console.log(`VideoPlayer: Detected HLS stream for ${item.title}: ${item.streamUrl}`);
         setupHlsPlayer();
       } else {
-        console.log(`VideoPlayer: Detected non-HLS (likely direct) stream for ${item.title}`);
+        console.log(`VideoPlayer: Detected non-HLS (likely direct) stream for ${item.title}: ${item.streamUrl}`);
         setupDefaultPlayer();
       }
     }
 
     return () => {
-      console.log("VideoPlayer: Cleaning up for stream:", item.streamUrl);
+      console.log("VideoPlayer: Cleaning up for stream:", item.streamUrl, "(Item:", item.title, ")");
       if (cleanupVideoEvents) {
         cleanupVideoEvents();
       }
       if (hlsRef.current) {
-        console.log("VideoPlayer: Destroying HLS instance on cleanup.");
+        console.log("VideoPlayer: Destroying HLS instance on cleanup for item:", item.title);
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
@@ -262,7 +258,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, item.streamUrl, item.title, item.type]); // Simplified dependencies, removed callbacks
+  }, [item.id, item.streamUrl, item.title, item.type]); // Simplified dependencies
 
   if (isYouTube && youTubeVideoId) {
     return (
@@ -287,7 +283,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         className="w-full h-full"
         playsInline 
         poster={item.posterUrl}
-        preload="auto"
+        preload="auto" // Changed from "metadata" to "auto" for potentially better default player buffering
       >
         Seu navegador não suporta a tag de vídeo ou o formato do vídeo.
       </video>
@@ -297,36 +293,10 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             <AlertTriangle className="h-5 w-5" />
             <AlertTitle>Erro ao Reproduzir</AlertTitle>
             <AlertDescription>{playerError}</AlertDescription>
-            {/* 
-              // Optional: Add a retry button
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="mt-3"
-                onClick={() => {
-                  setPlayerError(null);
-                  // Trigger a re-attempt to load the video.
-                  // This might involve re-setting the item or calling a load function.
-                  // For simplicity, we'll just clear the error here.
-                  // A more robust retry would re-initialize the player logic.
-                  if (videoRef.current) {
-                    videoRef.current.load(); // Basic HTML5 retry
-                    if (hlsRef.current) { // If HLS was used
-                        hlsRef.current.loadSource(item.streamUrl);
-                    } else if (videoRef.current.src) { // If direct src was used
-                        // Reloading a direct src is tricky without remounting or changing src
-                    }
-                  }
-                }}
-              >
-                Tentar Novamente
-              </Button> 
-            */}
           </Alert>
         </div>
       )}
     </div>
   );
 }
-
     
