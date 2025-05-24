@@ -3,17 +3,25 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
-import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath, RecentlyPlayedItem, PlaybackProgressData } from '@/types';
+import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath, RecentlyPlayedItem, PlaybackProgressData, PlaylistType, XCAPIResponse, XCUserInfo } from '@/types';
 import { parseM3U } from '@/lib/m3u-parser';
 import { parseXMLTV } from '@/lib/xmltv-parser';
 
 const MAX_RECENTLY_PLAYED_ITEMS = 20;
 const DEFAULT_START_PAGE: StartPagePath = '/app/channels';
+const MAX_ITEMS_PER_PLAYLIST = 100; // Keeping this for now
 
 interface PlaylistState {
   playlists: PlaylistItem[];
-  mediaItems: MediaItem[]; // Will not be persisted
-  addPlaylist: (url: string, name?: string) => Promise<void>;
+  mediaItems: MediaItem[]; 
+  addPlaylist: (playlistData: {
+    type: PlaylistType;
+    url?: string; // For M3U
+    xcDns?: string; // For XC
+    xcUsername?: string; // For XC
+    xcPassword?: string; // For XC
+    name?: string;
+  }) => Promise<void>;
   removePlaylist: (id: string) => void;
   fetchAndParsePlaylists: (forceRefresh?: boolean) => Promise<void>;
   isLoading: boolean;
@@ -47,7 +55,6 @@ const getLocalStorage = () => {
   if (typeof window !== 'undefined') {
     return localStorage;
   }
-  // Provide a mock storage for SSR or environments where localStorage is not available
   return {
     getItem: () => null,
     setItem: () => {},
@@ -55,7 +62,6 @@ const getLocalStorage = () => {
   };
 };
 
-// Define which parts of the state to persist
 type PersistentPlaylistState = Pick<
   PlaylistState, 
   'playlists' | 'epgUrl' | 'preferredStartPage' | 'favoriteItemIds' | 'playbackProgress' | 'recentlyPlayed'
@@ -79,7 +85,6 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
         console.error("StreamVerse: Failed to rehydrate state from localStorage:", error);
       } else {
         console.log("StreamVerse: Successfully rehydrated state from localStorage.");
-        // Defer store actions until after initial hydration and component mount
         setTimeout(() => {
             const currentState = usePlaylistStore.getState();
             const { playlists, mediaItems, epgUrl, epgData } = currentState;
@@ -102,7 +107,7 @@ export const usePlaylistStore = create<PlaylistState>()(
   persist(
     (set, get) => ({
       playlists: [],
-      mediaItems: [], // Not persisted
+      mediaItems: [], 
       isLoading: false,
       error: null,
 
@@ -143,7 +148,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         } else if (duration > 0 && currentTime / duration >= 0.95) { 
           set(state => {
             const newProgress = { ...state.playbackProgress };
-            delete newProgress[itemId]; // Remove progress if watched to near completion
+            delete newProgress[itemId]; 
             return { playbackProgress: newProgress };
           });
         }
@@ -163,9 +168,17 @@ export const usePlaylistStore = create<PlaylistState>()(
         });
       },
 
-      addPlaylist: async (url: string, name?: string) => {
-        if (get().playlists.some(p => p.url === url)) {
-          const errorMsg = `Playlist URL "${url}" already exists.`;
+      addPlaylist: async (playlistData) => {
+        const { type, url, xcDns, xcUsername, xcPassword, name } = playlistData;
+        
+        if (type === 'm3u' && url && get().playlists.some(p => p.type === 'm3u' && p.url === url)) {
+          const errorMsg = `Playlist URL "${url}" já existe.`;
+          set({ error: errorMsg });
+          console.warn(errorMsg);
+          return;
+        }
+        if (type === 'xc' && xcDns && xcUsername && get().playlists.some(p => p.type === 'xc' && p.xcDns === xcDns && p.xcUsername === xcUsername)) {
+          const errorMsg = `Playlist Xtream Codes com DNS "${xcDns}" e usuário "${xcUsername}" já existe.`;
           set({ error: errorMsg });
           console.warn(errorMsg);
           return;
@@ -174,39 +187,75 @@ export const usePlaylistStore = create<PlaylistState>()(
         set({ isLoading: true, error: null }); 
         
         try {
-          const newPlaylist: PlaylistItem = {
-            id: `${Date.now().toString()}-${Math.random().toString(36).substring(2, 7)}`, 
-            url,
-            name: name || `Playlist ${get().playlists.length + 1}`, 
+          let newPlaylist: PlaylistItem = {
+            id: `${Date.now().toString()}-${Math.random().toString(36).substring(2, 7)}`,
+            type,
+            name: name || (type === 'm3u' ? `Playlist M3U ${get().playlists.length + 1}` : `Playlist XC ${get().playlists.length + 1}`),
             addedAt: new Date().toISOString(),
           };
+
+          if (type === 'm3u' && url) {
+            newPlaylist.url = url;
+          } else if (type === 'xc' && xcDns && xcUsername && xcPassword) {
+            newPlaylist.xcDns = xcDns;
+            newPlaylist.xcUsername = xcUsername;
+            newPlaylist.xcPassword = xcPassword; // Store password for M3U URL construction
+
+            // Fetch expiry date for XC playlist
+            try {
+              const userInfoUrl = `${xcDns}/player_api.php?username=${xcUsername}&password=${xcPassword}`;
+              const proxyUserInfoUrl = `/api/proxy?url=${encodeURIComponent(userInfoUrl)}`;
+              const response = await fetch(proxyUserInfoUrl);
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.warn(`Falha ao buscar informações do usuário XC para ${xcDns} (status ${response.status}): ${errorText}`);
+              } else {
+                const data: XCAPIResponse = await response.json();
+                if (data && data.user_info && data.user_info.exp_date) {
+                  const expiryTimestamp = parseInt(data.user_info.exp_date, 10);
+                  if (!isNaN(expiryTimestamp)) {
+                    newPlaylist.expiryDate = new Date(expiryTimestamp * 1000).toISOString();
+                  }
+                } else if (data && (data as unknown as XCUserInfo).exp_date) { // some panels might have exp_date at root
+                   const expiryTimestamp = parseInt((data as unknown as XCUserInfo).exp_date as string, 10);
+                   if (!isNaN(expiryTimestamp)) {
+                    newPlaylist.expiryDate = new Date(expiryTimestamp * 1000).toISOString();
+                  }
+                }
+              }
+            } catch (e: any) {
+              console.warn(`Erro ao buscar data de validade para playlist XC ${xcDns}: ${e.message}`);
+            }
+          } else {
+            throw new Error("Dados da playlist inválidos fornecidos.");
+          }
+
           set((state) => ({
             playlists: [...state.playlists, newPlaylist],
           }));
           await get().fetchAndParsePlaylists(true); 
         } catch (e: any) { 
-          console.error("Error in addPlaylist process:", e);
-          set({ isLoading: false, error: e.message || "Failed to add playlist." });
+          console.error("Erro no processo addPlaylist:", e);
+          set({ isLoading: false, error: e.message || "Falha ao adicionar playlist." });
         }
       },
       removePlaylist: (id: string) => {
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
-          mediaItems: state.mediaItems.filter(item => item.originatingPlaylistId !== id) // Also remove items from this playlist
+          mediaItems: state.mediaItems.filter(item => item.originatingPlaylistId !== id)
         }));
-        // No need to call fetchAndParsePlaylists here if we manually remove items,
-        // unless there's a desire to re-evaluate duplicates from remaining lists.
-        // For simplicity now, we'll just remove them.
-        // If full re-parse is needed: get().fetchAndParsePlaylists(true);
       },
       fetchAndParsePlaylists: async (forceRefresh = false) => {
         if (!forceRefresh && get().mediaItems.length > 0 && !get().isLoading) {
-          console.log("StreamVerse: Using in-session media items.");
+          console.log("StreamVerse: Usando itens de mídia em sessão.");
           return;
         }
 
-        console.log(forceRefresh ? "StreamVerse: Forcing refresh of media items." : "StreamVerse: Cache empty or refresh needed, fetching media items.");
-        set({ isLoading: true, error: null, mediaItems: forceRefresh ? [] : get().mediaItems }); 
+        console.log(forceRefresh ? "StreamVerse: Forçando atualização dos itens de mídia." : "StreamVerse: Cache vazio ou atualização necessária, buscando itens de mídia.");
+        set({ isLoading: true, error: null }); 
+        if (forceRefresh) {
+          set({ mediaItems: [] });
+        }
         
         const currentPlaylists = get().playlists;
         let allMediaItems: MediaItem[] = [];
@@ -214,27 +263,38 @@ export const usePlaylistStore = create<PlaylistState>()(
 
         try {
           if (currentPlaylists.length === 0) {
-            console.log("StreamVerse: No playlists to fetch from.");
+            console.log("StreamVerse: Nenhuma playlist para buscar.");
             set({ mediaItems: [], isLoading: false, error: null });
             return;
           }
 
           const results = await Promise.allSettled(
-            currentPlaylists.map(playlist => parseM3U(playlist.url, playlist.id, playlist.name))
+            currentPlaylists.map(playlist => {
+              let m3uUrlToFetch: string;
+              if (playlist.type === 'xc' && playlist.xcDns && playlist.xcUsername && playlist.xcPassword) {
+                // Prefer m3u8 for HLS.js compatibility
+                m3uUrlToFetch = `${playlist.xcDns}/get.php?username=${playlist.xcUsername}&password=${playlist.xcPassword}&type=m3u_plus&output=m3u8`;
+              } else if (playlist.type === 'm3u' && playlist.url) {
+                m3uUrlToFetch = playlist.url;
+              } else {
+                return Promise.reject(new Error(`Configuração de playlist inválida para ${playlist.name || playlist.id}`));
+              }
+              return parseM3U(m3uUrlToFetch, playlist.id, playlist.name);
+            })
           );
 
           results.forEach((result, index) => {
             if (result.status === 'fulfilled') {
               allMediaItems = [...allMediaItems, ...result.value];
             } else {
-              const playlistIdentifier = currentPlaylists[index]?.name || currentPlaylists[index]?.url || `Playlist at index ${index}`;
-              console.error(`StreamVerse: Failed to parse playlist ${playlistIdentifier}:`, result.reason);
+              const playlistIdentifier = currentPlaylists[index]?.name || currentPlaylists[index]?.id || `Playlist no índice ${index}`;
+              console.error(`StreamVerse: Falha ao analisar playlist ${playlistIdentifier}:`, result.reason);
               const reasonMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
-              encounteredErrors.push(`Error loading "${playlistIdentifier}": ${reasonMessage}`);
+              encounteredErrors.push(`Erro ao carregar "${playlistIdentifier}": ${reasonMessage}`);
             }
           });
           
-          console.log(`StreamVerse: Successfully parsed ${allMediaItems.length} media items from ${currentPlaylists.length} playlist(s).`);
+          console.log(`StreamVerse: Analisados com sucesso ${allMediaItems.length} itens de mídia de ${currentPlaylists.length} playlist(s).`);
           set({ 
             mediaItems: allMediaItems, 
             isLoading: false, 
@@ -242,8 +302,8 @@ export const usePlaylistStore = create<PlaylistState>()(
           });
 
         } catch (e: any) { 
-          console.error("StreamVerse: Unexpected error in fetchAndParsePlaylists:", e);
-          set({ isLoading: false, error: e.message || "An unexpected error occurred while loading media items." });
+          console.error("StreamVerse: Erro inesperado em fetchAndParsePlaylists:", e);
+          set({ isLoading: false, error: e.message || "Ocorreu um erro inesperado ao carregar itens de mídia." });
         }
       },
 
@@ -264,11 +324,11 @@ export const usePlaylistStore = create<PlaylistState>()(
         }
 
         if (!forceRefresh && Object.keys(get().epgData).length > 0 && !get().epgLoading) {
-          console.log("StreamVerse: Using in-session EPG data.");
+          console.log("StreamVerse: Usando dados EPG em sessão.");
           return;
         }
         
-        console.log(forceRefresh ? "StreamVerse: Forcing refresh of EPG data." : "StreamVerse: EPG data empty or refresh needed.");
+        console.log(forceRefresh ? "StreamVerse: Forçando atualização dos dados EPG." : "StreamVerse: Dados EPG vazios ou atualização necessária.");
         set({ epgLoading: true, epgError: null });
 
         try {
@@ -276,7 +336,7 @@ export const usePlaylistStore = create<PlaylistState>()(
           const response = await fetch(proxyApiUrl);
 
           if (!response.ok) {
-            let proxyErrorDetails = 'Could not retrieve specific error details from proxy.';
+            let proxyErrorDetails = 'Não foi possível recuperar detalhes específicos do erro do proxy.';
              try {
                 const errorData = await response.json();
                 proxyErrorDetails = errorData.error || proxyErrorDetails;
@@ -285,35 +345,35 @@ export const usePlaylistStore = create<PlaylistState>()(
                     const textError = await response.text();
                     proxyErrorDetails = textError || proxyErrorDetails;
                 } catch (textReadError) {
-                    proxyErrorDetails = 'Proxy did not return a JSON response, and its body was unreadable as text.';
+                    proxyErrorDetails = 'Proxy não retornou uma resposta JSON, e seu corpo não pôde ser lido como texto.';
                 }
             }
             const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
-            throw new Error(`Failed to fetch EPG from ${epgUrl} via proxy (${upstreamStatusDescription}). Proxy: ${proxyErrorDetails}`);
+            throw new Error(`Falha ao buscar EPG de ${epgUrl} via proxy (${upstreamStatusDescription}). Proxy: ${proxyErrorDetails}`);
           }
           
           const xmlString = await response.text();
           
            if (!xmlString.trim().startsWith('<')) { 
-             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML (does not start with '<'). Please check the EPG URL. Content received (first 100 chars): ${xmlString.substring(0,100)}...`;
+             const errorDetail = `Dados EPG de ${epgUrl} não parecem ser XML válido (não começa com '<'). Verifique a URL do EPG. Conteúdo recebido (primeiros 100 caracteres): ${xmlString.substring(0,100)}...`;
              console.warn(errorDetail);
              throw new Error(errorDetail); 
           }
 
           const parsedEpgData = parseXMLTV(xmlString); 
-          console.log(`StreamVerse: Successfully parsed EPG data from ${epgUrl}, found programs for ${Object.keys(parsedEpgData).length} channels.`);
+          console.log(`StreamVerse: Dados EPG de ${epgUrl} analisados com sucesso, programas encontrados para ${Object.keys(parsedEpgData).length} canais.`);
           set({ epgData: parsedEpgData, epgLoading: false, epgError: null });
         } catch (e: any) {
-          console.error("StreamVerse: Error fetching or parsing EPG data:", e);
-          set({ epgLoading: false, epgError: e.message || "An error occurred while processing EPG data." });
+          console.error("StreamVerse: Erro ao buscar ou analisar dados EPG:", e);
+          set({ epgLoading: false, epgError: e.message || "Ocorreu um erro ao processar dados EPG." });
         }
       },
 
       resetAppState: () => {
-        console.log("StreamVerse: Resetting application state.");
+        console.log("StreamVerse: Redefinindo estado da aplicação.");
         set({
           playlists: [],
-          mediaItems: [], // Also clear in-memory items
+          mediaItems: [], 
           isLoading: false,
           error: null,
           epgUrl: null,
@@ -332,5 +392,5 @@ export const usePlaylistStore = create<PlaylistState>()(
 );
 
 if (typeof window !== 'undefined') {
-  console.log("StreamVerse: Initial store state before rehydration:", usePlaylistStore.getState());
+  console.log("StreamVerse: Estado inicial da store antes da reidratação:", usePlaylistStore.getState());
 }
