@@ -10,6 +10,7 @@ export interface PlaylistItem {
   name?: string;
   addedAt: string;
   source?: 'url' | 'file'; // To distinguish between URL-based and file-based M3U lists
+  fileContent?: string; // Store raw M3U content for file-based playlists
 
   // For M3U type (if source is 'url')
   url?: string;
@@ -36,7 +37,7 @@ export interface MediaItem {
   originatingPlaylistId: string;
   originatingPlaylistName?: string;
   baseName?: string; // Extracted base name, e.g., "ESPN", "GLOBO SP"
-  qualityTag?: string; // Extracted quality, e.g., "HD", "SD"
+  qualityTag?: string; // Extracted quality, e.g., "SD", "HD"
 }
 
 export interface EpgProgram {
