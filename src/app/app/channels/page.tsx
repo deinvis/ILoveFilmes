@@ -89,11 +89,12 @@ export default function ChannelsPage() {
     return channels;
   }, [mediaItems, parentalControlEnabled]);
 
-  // Pre-compute a map of baseName to all its variants from raw channels
+  // Pre-compute a map of baseName (normalized to uppercase) to all its variants from raw channels
   const logicalChannelVariantsMap = useMemo(() => {
     const map = new Map<string, MediaItem[]>();
     allChannelsRaw.forEach(channel => {
-        const key = channel.baseName || channel.title;
+        // Normalize key to uppercase for consistent grouping
+        const key = (channel.baseName || channel.title).toUpperCase();
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(channel);
     });
@@ -116,7 +117,7 @@ export default function ChannelsPage() {
 
     if (showOnlyMultiSource) {
         representativeChannels = representativeChannels.filter(repChannel => {
-            const variants = logicalChannelVariantsMap.get(repChannel.baseName || repChannel.title);
+            const variants = logicalChannelVariantsMap.get((repChannel.baseName || repChannel.title).toUpperCase());
             return variants && variants.length > 1;
         });
     }
@@ -156,7 +157,7 @@ export default function ChannelsPage() {
         groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
       }
       // Add the representative channel to the items list of the group
-      if (!groupsMap[normalizedKey].items.some(item => (item.baseName || item.title) === (representativeChannel.baseName || representativeChannel.title))) {
+      if (!groupsMap[normalizedKey].items.some(item => ((item.baseName || item.title).toUpperCase()) === ((representativeChannel.baseName || representativeChannel.title).toUpperCase()))) {
          groupsMap[normalizedKey].items.push(representativeChannel);
       }
     });
@@ -316,11 +317,12 @@ export default function ChannelsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
             {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(representativeItem => {
-              const allVariantsForThisLogicalChannel = logicalChannelVariantsMap.get(representativeItem.baseName || representativeItem.title) || [representativeItem];
+              // Normalize key to uppercase when retrieving from map
+              const allVariantsForThisLogicalChannel = logicalChannelVariantsMap.get((representativeItem.baseName || representativeItem.title).toUpperCase()) || [representativeItem];
               const nowPlayingProgram = getNowPlaying(representativeItem.tvgId);
               return (
                 <MediaCard
-                  key={`${representativeItem.baseName || representativeItem.title}-${representativeItem.id}`}
+                  key={`${(representativeItem.baseName || representativeItem.title)}-${representativeItem.id}`}
                   item={representativeItem} 
                   allChannelVariants={allVariantsForThisLogicalChannel} 
                   nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}

@@ -21,21 +21,18 @@ const MEDIA_TYPE_ICONS: Record<MediaType, React.ElementType> = {
   channel: Tv2,
   movie: Film,
   series: Clapperboard,
-  // anime: Tv2, // Removed anime
 };
 
 const MEDIA_TYPE_PATHS: Record<MediaType, string> = {
     channel: '/app/channels',
     movie: '/app/movies',
     series: '/app/series',
-    // anime: '/app/animes', // Removed anime
 };
 
 const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
   channel: 'canais',
   movie: 'filmes',
   series: 'séries',
-  // anime: 'animes', // Removed anime
 };
 
 
@@ -66,7 +63,6 @@ export default function GroupPage() {
   const mediaType = rawMediaType as MediaType;
   
   const { displayName: pageDisplayGroupName, normalizedKey: pageNormalizedGroupNameKey } = useMemo(() => {
-    // Pass mediaType to processGroupName when processing group name from URL
     return processGroupName(rawGroupNameFromUrl ? decodeURIComponent(rawGroupNameFromUrl) : 'UNCATEGORIZED', mediaType);
   }, [rawGroupNameFromUrl, mediaType]);
 
@@ -79,7 +75,6 @@ export default function GroupPage() {
     if (!mediaType || !pageNormalizedGroupNameKey) return [];
     let items = allMediaItemsFromStore.filter(item => {
       const itemRawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'UNCATEGORIZED';
-      // Pass item.type to processGroupName
       const { normalizedKey: itemNormalizedKey } = processGroupName(itemRawGroup, item.type);
       return item.type === mediaType && itemNormalizedKey === pageNormalizedGroupNameKey;
     });
@@ -91,7 +86,8 @@ export default function GroupPage() {
     if (mediaType !== 'channel') return new Map<string, MediaItem[]>();
     const map = new Map<string, MediaItem[]>();
     rawGroupItems.forEach(channel => {
-        const key = channel.baseName || channel.title;
+        // Normalize key to uppercase for consistent grouping
+        const key = (channel.baseName || channel.title).toUpperCase();
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(channel);
     });
@@ -161,9 +157,9 @@ export default function GroupPage() {
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentItemsToDisplay = filteredLogicalGroupItems.slice(startIndex, endIndex);
 
-  const PageIcon = mediaType ? MEDIA_TYPE_ICONS[mediaType] : ListFilter; // Added check for mediaType
-  const backPath = mediaType ? MEDIA_TYPE_PATHS[mediaType] : '/app'; // Added check for mediaType
-  const mediaTypeLabel = mediaType ? MEDIA_TYPE_LABELS[mediaType] : 'itens'; // Added check for mediaType
+  const PageIcon = mediaType ? MEDIA_TYPE_ICONS[mediaType] : ListFilter; 
+  const backPath = mediaType ? MEDIA_TYPE_PATHS[mediaType] : '/app'; 
+  const mediaTypeLabel = mediaType ? MEDIA_TYPE_LABELS[mediaType] : 'itens'; 
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (mediaType !== 'channel' || !tvgId || !epgData[tvgId] || epgLoading) return null;
@@ -211,7 +207,7 @@ export default function GroupPage() {
     );
   }
 
-  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series'].includes(mediaType)) { // Removed anime
+  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series'].includes(mediaType)) { 
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <XCircle className="w-20 h-20 text-destructive mb-6" />
@@ -278,11 +274,14 @@ export default function GroupPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
         {currentItemsToDisplay.map(representativeItem => {
-          const allVariantsForThisChannel = mediaType === 'channel' ? logicalChannelVariantsMap.get(representativeItem.baseName || representativeItem.title) : undefined;
+          // Normalize key to uppercase when retrieving from map for channels
+          const allVariantsForThisChannel = mediaType === 'channel' 
+            ? logicalChannelVariantsMap.get((representativeItem.baseName || representativeItem.title).toUpperCase()) 
+            : undefined;
           const nowPlayingProgram = mediaType === 'channel' ? getNowPlaying(representativeItem.tvgId) : null;
           return (
             <MediaCard
-              key={`${representativeItem.baseName || representativeItem.title}-${representativeItem.id}`}
+              key={`${(representativeItem.baseName || representativeItem.title)}-${representativeItem.id}`}
               item={representativeItem}
               allChannelVariants={allVariantsForThisChannel}
               nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}
