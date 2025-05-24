@@ -8,23 +8,24 @@ const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg',
 // Keywords for URL-based categorization (highest priority)
 const URL_STREAM_IS_CHANNEL_EXT = ['.ts'];
 const URL_SERIES_KEYWORDS = ['/series/'];
-const URL_MOVIE_KEYWORDS = ['/movies/', '/movie/'];
+const URL_MOVIE_KEYWORDS = ['/movie/', '/movies/']; // Added /movies/
 
 // Keywords for title-based categorization (second priority)
 const TITLE_PPV_KEYWORDS = ['ppv'];
 
 // Keywords for group-title based categorization (third priority)
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados', 'lançamentos'];
-const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'anime', 'animes'];
+const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados']; // Removed anime/animes, handled separately or as series
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal', 'esportes', 'noticias', 'infantil', 'documentarios', 'adulto'];
 
 // Keywords for title-based VOD categorization (fourth priority, if stream is VOD)
 const TITLE_SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 const TITLE_MOVIE_KEYWORDS_GENERAL = ['movie', 'film', 'pelicula'];
-const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow', 'anime', 'animes'];
+const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow']; // Removed anime/animes
 
 // General keywords for title-based categorization (fifth priority)
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ao vivo'];
+const ANIME_KEYWORDS = ['anime', 'animes'];
 
 
 export function parseM3UContent(m3uString: string, playlistId: string, playlistName?: string): MediaItem[] {
@@ -135,19 +136,26 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
             mediaType = 'series';
         } else if (URL_MOVIE_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
             mediaType = 'movie';
-        } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+        } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
+          // Check for anime before general series/movie by group title
+          if (ANIME_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
+            mediaType = 'series'; // Treat anime as series for grouping
+          } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
             mediaType = 'series';
           } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
             mediaType = 'movie';
           } else if (isVODStreamByExtension) {
-            if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
+            if (ANIME_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
+              mediaType = 'series'; // Treat anime as series
+            } else if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
               mediaType = 'series';
             } else {
               mediaType = 'movie';
             }
+          } else if (ANIME_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
+              mediaType = 'series'; // Treat anime as series
           } else if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
             mediaType = 'series';
           } else if (TITLE_MOVIE_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
@@ -160,7 +168,7 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         }
 
         let finalGenre: string | undefined = undefined;
-        if (mediaType === 'movie' || mediaType === 'series') {
+        if (mediaType === 'movie' || mediaType === 'series') { // Anime also uses genre like series
             if (tvggenre && tvggenre.trim() !== '') {
                 finalGenre = tvggenre.trim();
             } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ) {
@@ -197,8 +205,8 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
                 if ( (upperQualityTag && (upperQualityTag.includes("4K") || upperQualityTag.includes("UHD"))) ||
                      upperTitle.includes("4K") || upperTitle.includes("UHD") )
                 {
-                    console.log(`Overriding group for ${mediaItem.title} from '${mediaItem.groupTitle}' to 'GLOBO'`);
-                    mediaItem.groupTitle = "GLOBO"; // This will be processed by processGroupName later
+                    console.log(`OVERRIDE: Title='${mediaItem.title}', Extracted Base='${mediaItem.baseName}', Extracted Quality='${mediaItem.qualityTag}'. Original Group='${mediaItem.groupTitle}', Setting New Group='GLOBO'`);
+                    mediaItem.groupTitle = "GLOBO";
                 }
             }
         }
@@ -244,14 +252,14 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
       
       let finalDetailedErrorMessage: string;
       if (response.status === 429) {
-        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Proxy message: ${proxyErrorDetails})`;
-        console.warn(finalDetailedErrorMessage);
+        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
+        console.warn(finalDetailedErrorMessage); // Log as warning
       } else if (response.status === 503) {
          finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está atualmente indisponível (HTTP 503 Service Unavailable). Isso geralmente significa que o servidor externo está temporariamente fora do ar ou sobrecarregado. Por favor, tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
-         console.warn(finalDetailedErrorMessage);
+         console.warn(finalDetailedErrorMessage); // Log as warning
       } else {
         finalDetailedErrorMessage = `Falha ao buscar playlist via proxy (${upstreamStatusDescription}). Detalhes do proxy: ${proxyErrorDetails}. URL Original: ${playlistUrl}`;
-        console.error(finalDetailedErrorMessage);
+        console.error(finalDetailedErrorMessage); // Log as error for other failures
       }
       throw new Error(finalDetailedErrorMessage);
     }
