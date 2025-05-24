@@ -14,6 +14,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarInset,
+  SidebarMenuSkeleton, // Import skeleton
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -24,12 +25,12 @@ import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaType } from '@/types';
 
 interface NavItemConfig {
-  value: string; // For state management, e.g., 'channels'
+  value: string; 
   href: string;
   label: string;
   icon: React.ElementType;
   mediaType?: MediaType;
-  isStatic?: boolean; // To differentiate static items like Settings, Favorites
+  isStatic?: boolean; 
 }
 
 const mainCategoryNavItems: NavItemConfig[] = [
@@ -44,10 +45,29 @@ const staticNavItems: NavItemConfig[] = [
   { value: 'settings', href: '/app/settings', label: 'Configurações', icon: SettingsIcon, isStatic: true },
 ];
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+// ClientSideOnlyRenderer component
+const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?: React.ReactNode }> = ({ children, placeholder }) => {
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  if (!hasMounted) {
+    return <>{placeholder}</> || null;
+  }
+
+  return <>{children}</>;
+};
+
+
+const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
   const pathname = usePathname();
-  const [isMobileSheetOpen, setIsMobileSheetOpen] = React.useState(false);
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = usePlaylistStore(state => [ // Assuming Sheet open state is managed globally or passed down
+    (state as any).isMobileSheetOpen, // Example, adjust if state is named differently
+    (state as any).setIsMobileSheetOpen
+  ], () => true); // Zustand shallow compare
 
   const { mediaItems } = usePlaylistStore();
 
@@ -68,7 +88,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     mediaItems.forEach(item => {
       if (item.type && uniqueGroups[item.type]) {
         const group = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        if (group && !uniqueGroups[item.type].has(group)) { // Ensure group is not undefined
+        if (group && !uniqueGroups[item.type].has(group)) { 
           uniqueGroups[item.type].add(group);
           subs[item.type].push({
             label: group,
@@ -83,19 +103,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [mediaItems]);
   
   useEffect(() => {
-    // Automatically open submenu if a sub-item is active on initial load or navigation
     const currentMainCategory = mainCategoryNavItems.find(item => item.mediaType && pathname.startsWith(`/app/group/${item.mediaType}/`));
     if (currentMainCategory && !openSubmenus[currentMainCategory.value]) {
       setOpenSubmenus(prev => ({ ...prev, [currentMainCategory.value]: true }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]); // Rerun when pathname changes
+  }, [pathname]); 
 
   const toggleSubmenu = (itemValue: string) => {
     setOpenSubmenus(prev => ({ ...prev, [itemValue]: !prev[itemValue] }));
   };
+  
+  const closeMobileSheet = () => {
+    if (isMobile && setIsMobileSheetOpen && typeof setIsMobileSheetOpen === 'function') {
+      setIsMobileSheetOpen(false);
+    }
+  }
 
-  const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => (
+  return (
     <>
       {mainCategoryNavItems.map((item) => {
         const categorySubItems = item.mediaType ? subcategories[item.mediaType] : [];
@@ -103,10 +128,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
         
         const handleLinkClick = () => {
-          if (isMobile) {
-            if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
-              setIsMobileSheetOpen(false);
-            }
+          if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
+            closeMobileSheet();
           }
         };
 
@@ -120,11 +143,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   if (hasSubItems) {
                     toggleSubmenu(item.value);
                   }
-                  // For mobile: close sheet ONLY if it's a direct link (no subitems)
-                  // OR if it's a main link AND subitems are already open.
-                  // This prevents closing when just trying to expand.
-                  if (isMobile && (!hasSubItems || (hasSubItems && openSubmenus[item.value]))) {
-                     // setIsMobileSheetOpen(false); // This logic is a bit complex, handleLinkClick might be better
+                  if (!hasSubItems) { // Only close sheet if it's a direct link, not expanding a submenu
+                    handleLinkClick();
                   }
                 }}
                 tooltip={item.label}
@@ -134,13 +154,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <Link
                     href={item.href}
                     passHref 
-                    legacyBehavior 
+                    legacyBehavior={false} // Use false for modern Next.js Link behavior
                     onClick={handleLinkClick} 
+                    className="flex items-center gap-2 flex-grow" // Apply styles directly to Link for asChild false
                   >
-                    <a className="flex items-center gap-2 flex-grow">
-                      <item.icon className="h-5 w-5" />
-                      <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
-                    </a>
+                    <item.icon className="h-5 w-5" />
+                    <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                   </Link>
                 ) : (
                   <>
@@ -172,13 +191,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarMenu>
                   {categorySubItems.map(subItem => (
                     <SidebarMenuItem key={subItem.href}>
-                      <Link href={subItem.href} passHref legacyBehavior>
+                      <Link href={subItem.href} passHref legacyBehavior={false} className="w-full">
                         <SidebarMenuButton
                           isActive={pathname === subItem.href}
                           className="w-full justify-start h-auto py-1.5 text-xs font-normal" 
-                          onClick={() => {
-                            if (isMobile) setIsMobileSheetOpen(false);
-                          }}
+                          onClick={closeMobileSheet}
                           tooltip={subItem.label}
                         >
                           <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
@@ -194,13 +211,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       })}
       {staticNavItems.map((item) => (
          <SidebarMenuItem key={item.href}>
-          <Link href={item.href} passHref legacyBehavior>
+          <Link href={item.href} passHref legacyBehavior={false} className="w-full">
             <SidebarMenuButton
               isActive={pathname === item.href}
               className="w-full justify-start"
-              onClick={() => {
-                if (isMobile) setIsMobileSheetOpen(false);
-              }}
+              onClick={closeMobileSheet}
               tooltip={item.label}
             >
               <item.icon className="h-5 w-5" />
@@ -211,6 +226,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       ))}
     </>
   );
+}
+
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = React.useState(false);
+  // This state is now managed by NavLinks if needed, or context
+  // const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
+
+  // Placeholder for NavLinks before client-side rendering
+  const navLinksPlaceholder = (
+    <>
+      {[...mainCategoryNavItems, ...staticNavItems].map((item, index) => (
+        <SidebarMenuSkeleton key={`skeleton-${item.value || index}`} showIcon />
+      ))}
+    </>
+  );
+
 
   return (
     <SidebarProvider defaultOpen>
@@ -225,8 +257,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <PlaySquare className="h-8 w-8 text-primary" />
               </Link>
           </SidebarHeader>
-          <SidebarContent className="p-2"> {/* Removed flex-grow as SidebarContent component already has flex-1 */}
-            <NavLinks />
+          <SidebarContent className="p-2">
+            <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
+              <NavLinks />
+            </ClientSideOnlyRenderer>
           </SidebarContent>
           <SidebarFooter className="p-4 mt-auto group-data-[collapsible=icon]:hidden">
             <ThemeToggle />
@@ -251,8 +285,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       <SheetTitle className="text-xl font-bold">StreamVerse</SheetTitle>
                     </Link>
                 </MobileSheetHeader>
-                <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto"> {/* Added flex-grow and overflow-y-auto */}
-                  <NavLinks isMobile />
+                <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto"> 
+                  <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
+                    <NavLinks isMobile />
+                  </ClientSideOnlyRenderer>
                 </nav>
                  <div className="mt-auto p-4 border-t">
                     <ThemeToggle />
@@ -272,3 +308,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+
+    
