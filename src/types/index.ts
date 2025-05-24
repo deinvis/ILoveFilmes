@@ -9,8 +9,7 @@ export interface PlaylistItem {
   type: PlaylistType;
   name?: string;
   addedAt: string;
-  source?: 'url' | 'file'; // Distinguishes between URL-based and file-based M3U lists
-  // fileContent?: string; // Removed: Do not persist raw file content to avoid quota errors. Session only.
+  source?: 'url' | 'file';
 
   // For M3U type (if source is 'url')
   url?: string;
@@ -56,6 +55,7 @@ export interface RecentlyPlayedItem {
 export interface PlaybackProgressData {
   currentTime: number;
   duration: number;
+  lastUpdatedAt: number; // Added timestamp for LRU cache strategy
 }
 
 export interface XCUserInfo {

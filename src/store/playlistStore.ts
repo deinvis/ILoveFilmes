@@ -7,12 +7,13 @@ import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath, RecentlyPlayed
 import { parseM3UContent, fetchAndParseM3UUrl } from '@/lib/m3u-parser';
 import { parseXMLTV } from '@/lib/xmltv-parser';
 
-const MAX_RECENTLY_PLAYED_ITEMS = 20;
+const MAX_RECENTLY_PLAYED_ITEMS = 10; // Reduced from 20
+const MAX_PLAYBACK_PROGRESS_ENTRIES = 200; // New limit for playback progress entries
 const DEFAULT_START_PAGE: StartPagePath = '/app/channels';
 
 interface PlaylistState {
   playlists: PlaylistItem[];
-  mediaItems: MediaItem[];
+  mediaItems: MediaItem[]; // Not persisted, session only
   addPlaylist: (playlistData: {
     type: PlaylistType;
     url?: string;
@@ -20,7 +21,6 @@ interface PlaylistState {
     xcUsername?: string;
     xcPassword?: string;
     name?: string;
-    source?: 'url' | 'file'; // Keep source for distinction, even if file content isn't persisted
   }) => Promise<void>;
   addPlaylistFromFileContent: (fileContent: string, fileName: string) => Promise<void>;
   removePlaylist: (id: string) => void;
@@ -30,7 +30,7 @@ interface PlaylistState {
   error: string | null;
 
   epgUrl: string | null;
-  epgData: Record<string, EpgProgram[]>;
+  epgData: Record<string, EpgProgram[]>; // Not persisted, session only
   epgLoading: boolean;
   epgError: string | null;
   setEpgUrl: (url: string | null) => Promise<void>;
@@ -60,6 +60,7 @@ const getLocalStorage = () => {
   if (typeof window !== 'undefined') {
     return localStorage;
   }
+  // Provide a mock for SSR or environments where localStorage isn't available
   return {
     getItem: () => null,
     setItem: () => {},
@@ -77,8 +78,8 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
   storage: createJSONStorage(() => getLocalStorage()),
   partialize: (state) => ({
     playlists: state.playlists.map(p => {
-      // Ensure fileContent is not persisted with the playlist definition
-      const { fileContent, ...rest } = p;
+      // Ensure fileContent is NOT persisted with the playlist definition
+      const { ...rest } = p; // fileContent was removed from PlaylistItem for persistence
       return rest;
     }),
     epgUrl: state.epgUrl,
@@ -95,11 +96,11 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
         console.error("StreamVerse: Failed to rehydrate state from localStorage:", error);
       } else {
         console.log("StreamVerse: Successfully rehydrated state from localStorage.");
+        // Trigger fetches after rehydration if necessary
         setTimeout(() => {
             const currentState = usePlaylistStore.getState();
-            // Fetch for URL-based playlists. File-based playlists are session-only for content.
-            if ((currentState.playlists.some(p => p.source !== 'file' && (p.url || p.xcDns))) && !currentState.isLoading) {
-                 console.log("StreamVerse: Rehydrated URL/XC playlist definitions found, fetching media items.");
+            if (currentState.playlists.length > 0 && !currentState.isLoading) {
+                 console.log("StreamVerse: Rehydrated playlist definitions found, fetching media items.");
                  currentState.fetchAndParsePlaylists();
             }
             if (currentState.epgUrl && Object.keys(currentState.epgData).length === 0 && !currentState.epgLoading) {
@@ -116,12 +117,12 @@ export const usePlaylistStore = create<PlaylistState>()(
   persist(
     (set, get) => ({
       playlists: [],
-      mediaItems: [],
+      mediaItems: [], // Session only
       isLoading: false,
       error: null,
 
       epgUrl: null,
-      epgData: {},
+      epgData: {}, // Session only
       epgLoading: false,
       epgError: null,
 
@@ -148,13 +149,24 @@ export const usePlaylistStore = create<PlaylistState>()(
       playbackProgress: {},
       updatePlaybackProgress: (itemId: string, currentTime: number, duration: number) => {
         if (duration > 0 && currentTime > 5 && currentTime / duration < 0.95) {
-          set(state => ({
-            playbackProgress: {
-              ...state.playbackProgress,
-              [itemId]: { currentTime, duration }
+          set(state => {
+            const newProgress = { ...state.playbackProgress };
+            newProgress[itemId] = { currentTime, duration, lastUpdatedAt: Date.now() };
+
+            // Enforce MAX_PLAYBACK_PROGRESS_ENTRIES
+            const progressKeys = Object.keys(newProgress);
+            if (progressKeys.length > MAX_PLAYBACK_PROGRESS_ENTRIES) {
+              // Sort by lastUpdatedAt and remove the oldest ones
+              const sortedKeys = progressKeys.sort((a, b) => newProgress[a].lastUpdatedAt - newProgress[b].lastUpdatedAt);
+              const keysToRemoveCount = sortedKeys.length - MAX_PLAYBACK_PROGRESS_ENTRIES;
+              for (let i = 0; i < keysToRemoveCount; i++) {
+                delete newProgress[sortedKeys[i]];
+              }
             }
-          }));
+            return { playbackProgress: newProgress };
+          });
         } else if (duration > 0 && currentTime / duration >= 0.95) {
+          // Remove progress if video is considered watched
           set(state => {
             const newProgress = { ...state.playbackProgress };
             delete newProgress[itemId];
@@ -180,16 +192,7 @@ export const usePlaylistStore = create<PlaylistState>()(
       parentalControlEnabled: true,
       setParentalControlEnabled: (enabled: boolean) => {
         set({ parentalControlEnabled: enabled });
-        // Re-process media items with new filter state, will use in-memory items
-        const currentMediaItems = get().mediaItems; // Get current in-memory items
-        // This part is tricky, as fetchAndParsePlaylists rebuilds from URLs.
-        // For now, let's rely on pages re-filtering. A full refresh might be needed
-        // or fetchAndParsePlaylists needs to be smarter about re-applying filters
-        // to existing in-memory items if only parental control changed.
-        // For simplicity, we might trigger a full re-parse which now won't include file content.
-        // OR, pages just re-filter their view based on the new parentalControlEnabled state.
-        // The pages already use `applyParentalFilter` in their `useMemo` for display,
-        // so changing `parentalControlEnabled` should trigger re-renders with correct filtering.
+        // No need to call fetchAndParsePlaylists here, pages will re-filter based on the new state.
       },
 
       addPlaylistFromFileContent: async (fileContent: string, fileName: string) => {
@@ -198,31 +201,27 @@ export const usePlaylistStore = create<PlaylistState>()(
             const tempPlaylistId = `${Date.now().toString()}-${Math.random().toString(36).substring(2, 7)}`;
             const playlistNameForItems = fileName.trim() || `Arquivo ${tempPlaylistId.substring(0, 6)}`;
             
-            // Create a playlist definition *without* fileContent for storage
-            const playlistDefinitionForStorage: PlaylistItem = {
+            const newPlaylist: PlaylistItem = {
                 id: tempPlaylistId,
                 type: 'm3u',
                 name: playlistNameForItems,
                 source: 'file', // Mark as file source
-                // No fileContent here
+                // fileContent is NOT included here for persistence
                 addedAt: new Date().toISOString(),
             };
-            
-            // Parse the file content for the current session
-            const parsedFileItems = parseM3UContent(fileContent, tempPlaylistId, playlistNameForItems);
 
+            const parsedFileItems = parseM3UContent(fileContent, tempPlaylistId, playlistNameForItems);
+            
             set((state) => ({
-                playlists: [...state.playlists, playlistDefinitionForStorage], // Add playlist definition (small)
+                playlists: [...state.playlists, newPlaylist], // Add playlist definition
                 // Add parsed items directly to the session's mediaItems.
                 mediaItems: [
-                    ...state.mediaItems.filter(item => item.originatingPlaylistId !== tempPlaylistId), // Remove old if re-uploading same logical file
+                    ...state.mediaItems.filter(item => item.originatingPlaylistId !== tempPlaylistId), 
                     ...parsedFileItems
                 ],
-                isLoading: false, // Set loading to false AFTER items are processed for the file
-                error: null,
+                // isLoading will be set to false by fetchAndParsePlaylists
             }));
-            // No need to call fetchAndParsePlaylists here, as items are in memory for the session.
-            // If other URL playlists needed refreshing, that would be a separate action.
+            await get().fetchAndParsePlaylists(true); // This will combine with other sources and set isLoading to false
         } catch (e: any) {
             console.error("Erro ao adicionar playlist de arquivo:", e);
             set({ isLoading: false, error: e.message || "Falha ao adicionar playlist de arquivo." });
@@ -230,7 +229,7 @@ export const usePlaylistStore = create<PlaylistState>()(
       },
 
       addPlaylist: async (playlistData) => {
-        const { type, url, xcDns, xcUsername, xcPassword, name } = playlistData; // source is implicitly 'url' here
+        const { type, url, xcDns, xcUsername, xcPassword, name } = playlistData;
 
         if (type === 'm3u' && url && get().playlists.some(p => p.type === 'm3u' && p.url === url && p.source === 'url')) {
           const errorMsg = `Playlist URL "${url}" já existe.`;
@@ -253,7 +252,7 @@ export const usePlaylistStore = create<PlaylistState>()(
             type,
             name: name || (type === 'm3u' ? (url || `Playlist M3U ${get().playlists.length + 1}`) : (xcDns || `Playlist XC ${get().playlists.length + 1}`)),
             addedAt: new Date().toISOString(),
-            source: 'url' // Explicitly for M3U URLs and XC
+            source: 'url'
           };
 
           if (type === 'm3u' && url) {
@@ -276,7 +275,7 @@ export const usePlaylistStore = create<PlaylistState>()(
                   if (!isNaN(expiryTimestamp)) {
                     newPlaylist.expiryDate = new Date(expiryTimestamp * 1000).toISOString();
                   }
-                } else if (data && (data as unknown as XCUserInfo).exp_date) {
+                } else if (data && (data as unknown as XCUserInfo).exp_date) { // Handle direct exp_date for some XC panels
                    const expiryTimestamp = parseInt((data as unknown as XCUserInfo).exp_date as string, 10);
                    if (!isNaN(expiryTimestamp)) {
                     newPlaylist.expiryDate = new Date(expiryTimestamp * 1000).toISOString();
@@ -290,7 +289,6 @@ export const usePlaylistStore = create<PlaylistState>()(
              throw new Error("URL da playlist M3U não fornecida para playlist do tipo URL.");
           }
 
-
           set((state) => ({
             playlists: [...state.playlists, newPlaylist],
           }));
@@ -302,19 +300,11 @@ export const usePlaylistStore = create<PlaylistState>()(
       },
 
       removePlaylist: (id: string) => {
-        const playlistToRemove = get().playlists.find(p => p.id === id);
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
-          // If it was a file-based playlist, its items are session-only and will be removed from mediaItems
-          // when fetchAndParsePlaylists runs next or implicitly by not being re-added.
-          // To be explicit, we can filter mediaItems here:
-          mediaItems: playlistToRemove && playlistToRemove.source === 'file'
-            ? state.mediaItems.filter(item => item.originatingPlaylistId !== id)
-            : state.mediaItems,
+          mediaItems: state.mediaItems.filter(item => item.originatingPlaylistId !== id) // Also remove session items if a file-based playlist is removed
         }));
-        // Refresh media items, which will now exclude items from the removed playlist
-        // (whether URL or file based, as file-based won't be re-added from a persisted source)
-        get().fetchAndParsePlaylists(true);
+        get().fetchAndParsePlaylists(true); // Refresh from remaining URL sources
       },
 
       updatePlaylist: async (playlistId: string, updates: Partial<PlaylistItem>) => {
@@ -329,14 +319,10 @@ export const usePlaylistStore = create<PlaylistState>()(
         }
 
         const originalPlaylist = originalPlaylists[playlistIndex];
-        // Ensure fileContent is not part of updates to be persisted
-        const { fileContent, ...safeUpdates } = updates;
-        const updatedPlaylist = { ...originalPlaylist, ...safeUpdates };
-
+        const updatedPlaylist = { ...originalPlaylist, ...updates };
 
         if (originalPlaylist.source === 'file') {
             // Only name changes are persisted for file playlists. Content is session-only.
-            // No content refresh needed from URL as it's a file.
         } else if (originalPlaylist.type === 'm3u' && originalPlaylist.url !== updatedPlaylist.url) {
           playlistNeedsContentRefresh = true;
         } else if (originalPlaylist.type === 'xc' && (
@@ -377,23 +363,30 @@ export const usePlaylistStore = create<PlaylistState>()(
         if (playlistNeedsContentRefresh) {
           await get().fetchAndParsePlaylists(true);
         } else {
-          set ({ isLoading: false });
+          set ({ isLoading: false, error: null }); // Ensure error is cleared if no refresh
         }
       },
 
       fetchAndParsePlaylists: async (forceRefresh = false) => {
         const currentStoreState = get();
-        if (!forceRefresh && currentStoreState.mediaItems.length > 0 && !currentStoreState.isLoading) {
-           // If not forcing, and items exist, and not loading, assume valid session state.
-           // This is mainly to prevent re-fetch on simple navigation if not needed.
-           // On app load, onRehydrateStorage will trigger this.
-           // return; // Commented out to ensure it runs if called, e.g. after parental control change.
+        // If not forcing, and items exist, and not loading, this might be a nav re-render.
+        // However, onRehydrateStorage relies on this to fetch initial data.
+        // The isLoading check helps prevent concurrent fetches.
+        if (currentStoreState.isLoading && !forceRefresh) {
+            console.log("StreamVerse: Fetch and parse already in progress, skipping.");
+            return;
         }
-
         set({ isLoading: true, error: null });
         
         const currentPlaylists = get().playlists;
-        if (currentPlaylists.length === 0) {
+        // Get file-based items from the current session (were added by addPlaylistFromFileContent)
+        // These are not re-parsed here, just carried over if they exist from current session uploads.
+        const currentSessionFileItems = get().mediaItems.filter(mi => {
+            const plDef = currentPlaylists.find(p => p.id === mi.originatingPlaylistId);
+            return plDef && plDef.source === 'file';
+        });
+        
+        if (currentPlaylists.filter(p => p.source === 'url').length === 0 && currentSessionFileItems.length === 0) {
           set({ mediaItems: [], isLoading: false, error: null });
           return;
         }
@@ -402,13 +395,13 @@ export const usePlaylistStore = create<PlaylistState>()(
         let encounteredErrors: string[] = [];
 
         const urlBasedPlaylistPromises = currentPlaylists
-          .filter(p => (p.type === 'm3u' && p.url && p.source === 'url') || (p.type === 'xc' && p.xcDns))
+          .filter(p => p.source === 'url' && ((p.type === 'm3u' && p.url) || (p.type === 'xc' && p.xcDns)))
           .map(async (playlist) => {
             try {
               if (playlist.type === 'xc' && playlist.xcDns && playlist.xcUsername && playlist.xcPassword) {
                 const m3uUrlToFetch = `${playlist.xcDns}/get.php?username=${playlist.xcUsername}&password=${playlist.xcPassword}&type=m3u_plus&output=m3u8`;
                 return fetchAndParseM3UUrl(m3uUrlToFetch, playlist.id, playlist.name);
-              } else if (playlist.type === 'm3u' && playlist.url && playlist.source === 'url') {
+              } else if (playlist.type === 'm3u' && playlist.url) {
                 return fetchAndParseM3UUrl(playlist.url, playlist.id, playlist.name);
               }
               return [];
@@ -427,29 +420,22 @@ export const usePlaylistStore = create<PlaylistState>()(
                 allParsedMediaItemsFromUrls.push(...result.value);
             }
         });
-
-        // Preserve existing file-based items from the current session's mediaItems
-        // These were added during upload and are not re-parsed from localStorage content.
-        const existingFileBasedMediaItems = get().mediaItems.filter(mi => {
-            const plDef = currentPlaylists.find(p => p.id === mi.originatingPlaylistId);
-            return plDef && plDef.source === 'file';
-        });
           
         const uniqueUrlMediaItems = Array.from(new Map(allParsedMediaItemsFromUrls.map(item => [item.id, item])).values());
 
         set({ 
-          mediaItems: [...existingFileBasedMediaItems, ...uniqueUrlMediaItems], 
+          mediaItems: [...currentSessionFileItems, ...uniqueUrlMediaItems], 
           isLoading: false, 
           error: encounteredErrors.length > 0 ? encounteredErrors.join('; ') : null 
         });
       },
 
       setEpgUrl: async (url: string | null) => {
-        set({ epgUrl: url, epgError: null, epgData: {} });
+        set({ epgUrl: url, epgError: null, epgData: {} }); // Clear old EPG data
         if (url) {
           await get().fetchAndParseEpg(true);
         } else {
-          set({ epgLoading: false });
+          set({ epgLoading: false }); // Ensure loading stops if URL is cleared
         }
       },
       fetchAndParseEpg: async (forceRefresh = false) => {
@@ -465,24 +451,33 @@ export const usePlaylistStore = create<PlaylistState>()(
         try {
           const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(epgUrl)}`;
           const response = await fetch(proxyApiUrl);
+          let proxyErrorDetails = 'Could not retrieve specific error details from proxy.';
+          
           if (!response.ok) {
-            let proxyErrorDetails = 'Could not retrieve specific error details from proxy.';
              try {
                 const errorData = await response.json();
-                proxyErrorDetails = errorData.error || proxyErrorDetails;
+                if (errorData && typeof errorData.error === 'string') {
+                     proxyErrorDetails = errorData.error;
+                } else if (errorData) { 
+                    proxyErrorDetails = `Proxy returned an unexpected JSON error format: ${JSON.stringify(errorData)}`;
+                }
             } catch (e) {
                 try {
                     const textError = await response.text();
-                    proxyErrorDetails = textError || proxyErrorDetails;
-                } catch (textReadError) {}
+                    if (textError && textError.trim() !== '') {
+                        proxyErrorDetails = `Proxy Response (non-JSON): ${textError.trim()}`;
+                    }
+                } catch (textReadError) { /* proxyErrorDetails remains as default */ }
             }
             const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
-            throw new Error(`Failed to fetch EPG from ${epgUrl} via proxy (${upstreamStatusDescription}). Proxy: ${proxyErrorDetails}`);
+            throw new Error(`Failed to fetch EPG from ${epgUrl} via proxy (${upstreamStatusDescription}). Proxy details: ${proxyErrorDetails}`);
           }
           
           const xmlString = await response.text();
           if (!xmlString.trim().startsWith('<')) { 
-             console.warn(`EPG data from ${epgUrl} does not appear to be valid XML.`);
+             const errorDetail = `EPG data from ${epgUrl} does not appear to be valid XML. Content started with: "${xmlString.substring(0, Math.min(50, xmlString.length))}"`;
+             console.warn(errorDetail);
+             // Don't throw here, let parser attempt and fail if truly invalid
           }
 
           const parsedEpgData = parseXMLTV(xmlString);
@@ -514,4 +509,3 @@ export const usePlaylistStore = create<PlaylistState>()(
     persistOptions
   )
 );
-
