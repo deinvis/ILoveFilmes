@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
-import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle, ShieldCheck, Tv2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,12 +27,13 @@ import { usePlaylistStore } from '@/store/playlistStore';
 import { useToast } from "@/hooks/use-toast";
 import type { StartPagePath } from '@/types';
 
-const startPageOptions: { value: StartPagePath, label: string }[] = [
-  { value: '/app/channels', label: 'Canais' },
-  { value: '/app/movies', label: 'Filmes' },
-  { value: '/app/series', label: 'Séries' },
-  { value: '/app/favorites', label: 'Favoritos' },
-  { value: '/app/recent', label: 'Recentes' },
+const startPageOptions: { value: StartPagePath, label: string, icon: React.ElementType }[] = [
+  { value: '/app/channels', label: 'Canais', icon: Tv2 },
+  { value: '/app/movies', label: 'Filmes', icon: Film },
+  { value: '/app/series', label: 'Séries', icon: Clapperboard },
+  { value: '/app/animes', label: 'Animes', icon: Tv2 }, // Using Tv2 for animes
+  { value: '/app/favorites', label: 'Favoritos', icon: Heart },
+  { value: '/app/recent', label: 'Recentes', icon: History },
 ];
 
 export default function SettingsPage() {
@@ -134,6 +135,7 @@ export default function SettingsPage() {
             {startPageOptions.map((option) => (
               <div key={option.value} className="flex items-center space-x-2">
                 <RadioGroupItem value={option.value} id={option.value} />
+                <option.icon className="mr-2 h-4 w-4 text-muted-foreground" />
                 <Label htmlFor={option.value}>{option.label}</Label>
               </div>
             ))}

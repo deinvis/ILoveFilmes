@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'; // Added SheetTrigger
+import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import React, { useMemo, useState, useEffect } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaItem, MediaType } from '@/types';
@@ -38,6 +38,7 @@ const mainCategoryNavItems: NavItemConfig[] = [
   { value: 'channels', href: '/app/channels', label: 'Canais', icon: Tv2, mediaType: 'channel' },
   { value: 'movies', href: '/app/movies', label: 'Filmes', icon: Film, mediaType: 'movie' },
   { value: 'series', href: '/app/series', label: 'Séries', icon: Clapperboard, mediaType: 'series' },
+  { value: 'animes', href: '/app/animes', label: 'Animes', icon: Tv2, mediaType: 'anime' }, // Using Tv2 for Anime
 ];
 
 const staticNavItems: NavItemConfig[] = [
@@ -73,6 +74,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: [],
       movie: [],
       series: [],
+      anime: [], // Added anime
     };
     if (!mediaItems || mediaItems.length === 0) return subs;
 
@@ -82,14 +84,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: new Set(),
       movie: new Set(),
       series: new Set(),
+      anime: new Set(), // Added anime
     };
 
     filteredMediaItemsForSidebar.forEach(item => {
       if (item.type && uniqueNormalizedGroups[item.type]) {
         const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
+        // Pass mediaType to processGroupName
         const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup, item.type);
 
-        if (processedDisplayName && processedDisplayName !== 'Uncategorized' && !uniqueNormalizedGroups[item.type].has(normalizedKey)) {
+
+        if (processedDisplayName && processedDisplayName !== 'UNCATEGORIZED' && !uniqueNormalizedGroups[item.type].has(normalizedKey)) {
           uniqueNormalizedGroups[item.type].add(normalizedKey);
           subs[item.type].push({
             label: processedDisplayName,
@@ -109,7 +114,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setOpenSubmenus(prev => ({ ...prev, [currentMainCategory.value]: true }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]); // Only run on pathname change, openSubmenus is self-managed
+  }, [pathname]); 
 
 
   const toggleSubmenu = (itemValue: string) => {
@@ -135,6 +140,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               handleLinkClickAndCloseSheet();
             }
           };
+          
+          const mainItemIsJustLink = !hasSubItems || (pathname === item.href && !openSubmenus[item.value]);
 
           return (
             <React.Fragment key={item.value}>
@@ -143,23 +150,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   isActive={isMainActive}
                   className={cn(
                     "w-full",
-                    hasSubItems ? "justify-between" : "justify-start"
+                    hasSubItems ? "justify-between" : "justify-start" 
                   )}
-                  onClick={() => { // Simplified onClick
+                  onClick={() => { 
                     if (hasSubItems) {
                       toggleSubmenu(item.value);
                     }
                   }}
                   tooltip={item.label}
-                  asChild={!hasSubItems} 
+                  asChild={mainItemIsJustLink}
                 >
-                  {!hasSubItems ? (
-                    <Link
+                  {mainItemIsJustLink ? (
+                     <Link
                       href={item.href}
                       passHref
-                      legacyBehavior={false} // Important for asChild with modern Link
+                      legacyBehavior={false} 
                       onClick={handleMainItemClick}
-                      className="flex items-center flex-grow" // Ensure link takes full space
+                      className="flex items-center flex-grow" 
                     >
                       <item.icon className="h-5 w-5 mr-2 shrink-0" />
                       <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
@@ -176,17 +183,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         <item.icon className="h-5 w-5 mr-2 shrink-0" />
                         <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                       </Link>
-                      <ChevronDown
-                        className={cn(
-                          "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
-                          openSubmenus[item.value] ? "rotate-180" : ""
-                        )}
-                        onClick={(e) => { // Ensure chevron click only toggles, doesn't navigate link
-                            e.stopPropagation();
-                            e.preventDefault();
-                            toggleSubmenu(item.value);
-                        }}
-                      />
+                      {hasSubItems && (
+                        <ChevronDown
+                            className={cn(
+                            "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
+                            openSubmenus[item.value] ? "rotate-180" : ""
+                            )}
+                            onClick={(e) => { 
+                                e.stopPropagation();
+                                e.preventDefault();
+                                toggleSubmenu(item.value);
+                            }}
+                        />
+                      )}
                     </>
                   )}
                 </SidebarMenuButton>
@@ -269,7 +278,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarFooter>
         </Sidebar>
 
-        {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background px-6 md:hidden">
             <Sheet open={isMobileSheetOpen} onOpenChange={setIsMobileSheetOpen}>
@@ -309,3 +317,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+

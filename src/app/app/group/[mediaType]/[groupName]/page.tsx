@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link'; // Keep Link import
+import Link from 'next/link';
 import { usePlaylistStore } from '@/store/playlistStore';
 import { MediaCard } from '@/components/MediaCard';
 import type { MediaItem, MediaType, EpgProgram } from '@/types';
@@ -15,19 +15,29 @@ import { Input } from '@/components/ui/input';
 import { applyParentalFilter } from '@/lib/parental-filter';
 import { processGroupName } from '@/lib/group-name-utils';
 
-const ITEMS_PER_PAGE = 20; // For logical items (e.g., logical channels)
+const ITEMS_PER_PAGE = 20;
 
 const MEDIA_TYPE_ICONS: Record<MediaType, React.ElementType> = {
   channel: Tv2,
   movie: Film,
   series: Clapperboard,
+  anime: Tv2, // Using Tv2 icon for Anime
 };
 
 const MEDIA_TYPE_PATHS: Record<MediaType, string> = {
     channel: '/app/channels',
     movie: '/app/movies',
     series: '/app/series',
-}
+    anime: '/app/animes',
+};
+
+const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
+  channel: 'canais',
+  movie: 'filmes',
+  series: 'séries',
+  anime: 'animes',
+};
+
 
 export default function GroupPage() {
   const params = useParams();
@@ -40,7 +50,7 @@ export default function GroupPage() {
   const [progressValue, setProgressValue] = useState(10);
 
   const {
-    mediaItems: allMediaItemsFromStore, // Renamed to avoid conflict
+    mediaItems: allMediaItemsFromStore,
     isLoading: storeIsLoading,
     error: storeError,
     fetchAndParsePlaylists,
@@ -56,7 +66,7 @@ export default function GroupPage() {
   const mediaType = rawMediaType as MediaType;
   
   const { displayName: pageDisplayGroupName, normalizedKey: pageNormalizedGroupNameKey } = useMemo(() => {
-    return processGroupName(rawGroupNameFromUrl ? decodeURIComponent(rawGroupNameFromUrl) : 'Uncategorized', mediaType);
+    return processGroupName(rawGroupNameFromUrl ? decodeURIComponent(rawGroupNameFromUrl) : 'UNCATEGORIZED', mediaType);
   }, [rawGroupNameFromUrl, mediaType]);
 
 
@@ -64,11 +74,10 @@ export default function GroupPage() {
     setIsClient(true);
   }, []);
 
-  // Get all raw items belonging to this group and media type
   const rawGroupItems = useMemo(() => {
     if (!mediaType || !pageNormalizedGroupNameKey) return [];
     let items = allMediaItemsFromStore.filter(item => {
-      const itemRawGroup = item.groupTitle || (item.type === 'movie' || item.type === 'series' ? item.genre : undefined) || 'Uncategorized';
+      const itemRawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'UNCATEGORIZED';
       const { normalizedKey: itemNormalizedKey } = processGroupName(itemRawGroup, item.type);
       return item.type === mediaType && itemNormalizedKey === pageNormalizedGroupNameKey;
     });
@@ -76,23 +85,32 @@ export default function GroupPage() {
     return items;
   }, [allMediaItemsFromStore, mediaType, pageNormalizedGroupNameKey, parentalControlEnabled]);
 
-  // Process rawGroupItems into logical items (e.g., one entry per baseName for channels)
+  // This map is used for channel variant selection in MediaCard
+  const logicalChannelVariantsMap = useMemo(() => {
+    if (mediaType !== 'channel') return new Map<string, MediaItem[]>();
+    const map = new Map<string, MediaItem[]>();
+    rawGroupItems.forEach(channel => {
+        const key = channel.baseName || channel.title;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(channel);
+    });
+    map.forEach(variants => {
+        variants.sort((a, b) => 
+            (a.qualityTag || 'ZZZ').localeCompare(b.qualityTag || 'ZZZ') ||
+            (a.originatingPlaylistName || '').localeCompare(b.originatingPlaylistName || '')
+        );
+    });
+    return map;
+  }, [rawGroupItems, mediaType]);
+
   const logicalGroupItems = useMemo(() => {
     if (mediaType === 'channel') {
-      const logicalChannelMap = new Map<string, MediaItem[]>();
-      rawGroupItems.forEach(channel => {
-        const key = channel.baseName || channel.title;
-        if (!logicalChannelMap.has(key)) logicalChannelMap.set(key, []);
-        logicalChannelMap.get(key)!.push(channel);
-      });
-      logicalChannelMap.forEach(variants => {
-        variants.sort((a, b) => (a.qualityTag || '').localeCompare(b.qualityTag || '') || (a.originatingPlaylistName || '').localeCompare(b.originatingPlaylistName || ''));
-      });
-      return Array.from(logicalChannelMap.values()); // Array of variant arrays
+        // For channels, we want to display one card per baseName (logical channel)
+        return Array.from(logicalChannelVariantsMap.values()).map(variants => variants[0]).filter(Boolean) as MediaItem[];
     }
-    // For movies and series, each item is currently its own logical item for this page
-    return rawGroupItems.map(item => [item]); // Wrap in array to match channel structure
-  }, [rawGroupItems, mediaType]);
+    // For movies, series, and animes, each item is its own logical item for this page
+    return rawGroupItems;
+  }, [rawGroupItems, mediaType, logicalChannelVariantsMap]);
 
 
   useEffect(() => {
@@ -134,19 +152,19 @@ export default function GroupPage() {
 
   const filteredLogicalGroupItems = useMemo(() => {
     if (!debouncedSearchTerm) return logicalGroupItems;
-    return logicalGroupItems.filter(itemVariants => {
-      const representativeItem = itemVariants[0]; // Search based on representative item
-      return (representativeItem.baseName || representativeItem.title).toLowerCase().includes(debouncedSearchTerm.toLowerCase());
+    return logicalGroupItems.filter(item => {
+      return (item.baseName || item.title).toLowerCase().includes(debouncedSearchTerm.toLowerCase());
     });
   }, [logicalGroupItems, debouncedSearchTerm]);
 
   const totalPages = Math.ceil(filteredLogicalGroupItems.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
-  const currentLogicalItemsToDisplay = filteredLogicalGroupItems.slice(startIndex, endIndex);
+  const currentItemsToDisplay = filteredLogicalGroupItems.slice(startIndex, endIndex);
 
   const PageIcon = MEDIA_TYPE_ICONS[mediaType] || ListFilter;
   const backPath = MEDIA_TYPE_PATHS[mediaType] || '/app';
+  const mediaTypeLabel = MEDIA_TYPE_LABELS[mediaType] || mediaType;
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (mediaType !== 'channel' || !tvgId || !epgData[tvgId] || epgLoading) return null;
@@ -159,7 +177,7 @@ export default function GroupPage() {
       <div className="space-y-6">
         <Skeleton className="h-10 w-40 mb-2" />
         <Skeleton className="h-12 w-3/4 mb-4" />
-        {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && logicalGroupItems.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+        {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && logicalGroupItems.length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
          <div className="relative sm:w-1/2 md:w-1/3 mb-6">
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input type="search" placeholder="Search in this group..." className="w-full pl-10" disabled />
@@ -184,24 +202,24 @@ export default function GroupPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <AlertTriangle className="w-20 h-20 text-destructive mb-6" />
-        <h2 className="text-3xl font-semibold mb-3">Error Loading Group</h2>
+        <h2 className="text-3xl font-semibold mb-3">Erro ao Carregar Grupo</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">{storeError}</p>
-        <Button onClick={() => fetchAndParsePlaylists(true)} size="lg">Try Again</Button>
+        <Button onClick={() => fetchAndParsePlaylists(true)} size="lg">Tentar Novamente</Button>
         <Button variant="outline" onClick={() => router.push(backPath)} className="mt-4">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to {mediaType}s
+            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para {mediaTypeLabel}
         </Button>
       </div>
     );
   }
 
-  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series'].includes(mediaType)) {
+  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series', 'anime'].includes(mediaType)) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <XCircle className="w-20 h-20 text-destructive mb-6" />
-        <h2 className="text-3xl font-semibold mb-3">Invalid Group or Media Type</h2>
-        <p className="text-muted-foreground text-lg mb-8 max-w-md">The requested group or media type is not valid. Please check the URL or navigate from the main sections.</p>
+        <h2 className="text-3xl font-semibold mb-3">Grupo ou Tipo de Mídia Inválido</h2>
+        <p className="text-muted-foreground text-lg mb-8 max-w-md">O grupo ou tipo de mídia solicitado não é válido. Por favor, verifique a URL ou navegue a partir das seções principais.</p>
         <Button onClick={() => router.push('/app')} size="lg">
-          <ArrowLeft className="mr-2 h-4 w-4" /> Go to Main Page
+          <ArrowLeft className="mr-2 h-4 w-4" /> Ir para a Página Principal
         </Button>
       </div>
     );
@@ -213,10 +231,10 @@ export default function GroupPage() {
         <PageIcon className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Nenhum Item em "{pageDisplayGroupName}"</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          There are no {mediaType}s listed under the group "{pageDisplayGroupName}". This might be due to parental control settings or filters.
+          Não há {mediaTypeLabel} listados no grupo "{pageDisplayGroupName}". Isso pode ser devido às configurações de controle parental ou filtros.
         </p>
         <Button onClick={() => router.push(backPath)} size="lg" variant="outline">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to all {mediaType}s
+            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para todos os {mediaTypeLabel}
         </Button>
       </div>
     );
@@ -226,13 +244,13 @@ export default function GroupPage() {
   return (
     <div className="space-y-6">
        <Button variant="outline" onClick={() => router.push(backPath)} className="mb-2">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para todos {mediaType === 'channel' ? 'os canais' : mediaType === 'movie' ? 'os filmes' : 'as séries'}
+            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para todos os {mediaTypeLabel}
        </Button>
 
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center capitalize">
           <PageIcon className="mr-3 h-8 w-8 text-primary" />
-          {pageDisplayGroupName} ({mediaType === 'channel' ? 'Canais' : mediaType === 'movie' ? 'Filmes' : 'Séries'})
+          {pageDisplayGroupName} ({mediaType === 'channel' ? 'Canais' : mediaType === 'movie' ? 'Filmes' : mediaType === 'series' ? 'Séries' : 'Animes'})
         </h1>
          {logicalGroupItems.length > 0 && (
             <div className="relative sm:w-1/2 md:w-1/3">
@@ -248,26 +266,26 @@ export default function GroupPage() {
         )}
       </div>
 
-      {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && logicalGroupItems.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && logicalGroupItems.length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
 
 
       {filteredLogicalGroupItems.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-          <p className="text-xl text-muted-foreground">Nenhum {mediaType === 'channel' ? 'canal' : mediaType === 'movie' ? 'filme' : 'série'} encontrado em "{pageDisplayGroupName}" para "{debouncedSearchTerm}".</p>
+          <p className="text-xl text-muted-foreground">Nenhum {mediaTypeLabel.slice(0, -1)} encontrado em "{pageDisplayGroupName}" para "{debouncedSearchTerm}".</p>
            <Button variant="link" onClick={() => setSearchTerm('')} className="mt-4">Limpar Busca</Button>
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-        {currentLogicalItemsToDisplay.map(variants => {
-          const representativeItem = variants[0];
+        {currentItemsToDisplay.map(representativeItem => {
+          const allVariantsForThisChannel = mediaType === 'channel' ? logicalChannelVariantsMap.get(representativeItem.baseName || representativeItem.title) : undefined;
           const nowPlayingProgram = mediaType === 'channel' ? getNowPlaying(representativeItem.tvgId) : null;
           return (
             <MediaCard
-              key={`${representativeItem.baseName || representativeItem.id}`}
+              key={`${representativeItem.baseName || representativeItem.title}-${representativeItem.id}`}
               item={representativeItem}
-              allChannelVariants={mediaType === 'channel' ? variants : undefined}
+              allChannelVariants={allVariantsForThisChannel}
               nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}
             />
           );
@@ -298,9 +316,10 @@ export default function GroupPage() {
        {logicalGroupItems.length > 0 && filteredLogicalGroupItems.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <PageIcon className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-           <p className="text-xl text-muted-foreground">Nenhum {mediaType === 'channel' ? 'canal' : mediaType === 'movie' ? 'filme' : 'série'} para exibir em "{pageDisplayGroupName}" com os filtros atuais.</p>
+           <p className="text-xl text-muted-foreground">Nenhum {mediaTypeLabel.slice(0, -1)} para exibir em "{pageDisplayGroupName}" com os filtros atuais.</p>
          </div>
        )}
     </div>
   );
 }
+

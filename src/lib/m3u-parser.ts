@@ -2,26 +2,31 @@
 import type { MediaItem, MediaType } from '@/types';
 import { extractChannelInfo } from '@/lib/channel-name-utils';
 
-const MAX_ITEMS_PER_PLAYLIST = 1500; // Limite para não sobrecarregar
+const MAX_ITEMS_PER_PLAYLIST = 1500;
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 
-// Keywords for URL-based categorization (high priority)
-const URL_STREAM_IS_CHANNEL_EXT = ['.ts']; // .ts files are usually live streams
+// Keywords for URL-based categorization (highest priority)
+const URL_STREAM_IS_CHANNEL_EXT = ['.ts'];
 const URL_SERIES_KEYWORDS = ['/series/'];
 const URL_MOVIE_KEYWORDS = ['/movies/', '/movie/'];
 
 // Keywords for title-based categorization (second priority)
 const TITLE_PPV_KEYWORDS = ['ppv'];
 
+// Keywords for anime detection (high priority after channel/ppv specific URL/title checks)
+const ANIME_GROUP_KEYWORDS = ['anime', 'animes', 'desenhos japoneses', 'animação japonesa'];
+const ANIME_TITLE_KEYWORDS = ['anime', 'animes'];
+
+
 // Keywords for group-title based categorization (third priority)
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados', 'lançamentos'];
-const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes', 'anime'];
+const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados']; // Exclude anime here
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal', 'esportes', 'noticias', 'infantil', 'documentarios', 'adulto'];
 
 // Keywords for title-based VOD categorization (fourth priority, if stream is VOD)
 const TITLE_SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 const TITLE_MOVIE_KEYWORDS_GENERAL = ['movie', 'film', 'pelicula'];
-const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow'];
+const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow']; // Exclude anime here
 
 // General keywords for title-based categorization (fifth priority)
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ao vivo'];
@@ -58,10 +63,9 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         attributesString = infoLineContent.substring(0, lastCommaIndex);
         extinfTitle = infoLineContent.substring(lastCommaIndex + 1).trim();
       } else {
-        // Handle cases where there are no attributes, only duration and title, or just title
-        if (!attributesString.includes('=')) { // If no '=' it's likely just title or duration,title
+        if (!attributesString.includes('=')) {
             extinfTitle = attributesString.split(',').pop()?.trim() || attributesString.trim();
-            attributesString = ""; // No actual attributes
+            attributesString = "";
         }
       }
 
@@ -75,7 +79,6 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         currentRawItem[key] = value;
       }
 
-      // Prioritize tvg-name for title, then the title from after the comma in #EXTINF
       if (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '') {
         currentRawItem.title = currentRawItem.tvgname.trim();
       } else if (currentRawItem.title && currentRawItem.title.trim() !== '') {
@@ -105,67 +108,75 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         const streamUrl = line;
         const {
           posterUrl,
-          grouptitle,
+          grouptitle, // raw group title from m3u
           tvgId,
           tvggenre,
           originatingPlaylistId: itemOriginatingPlaylistId,
           originatingPlaylistName: itemOriginatingPlaylistName
         } = currentRawItem;
 
-        const fullTitle = currentRawItem.title; // This is the title before extracting baseName/quality
-
+        const fullTitle = currentRawItem.title;
         const { baseName, qualityTag } = extractChannelInfo(fullTitle);
 
         const itemIndexInFile = items.length;
-        // Use tvgId if available and unique, otherwise combine baseName/title with index for uniqueness
         let semanticPart = tvgId || baseName.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         if (semanticPart.length === 0 || semanticPart.trim() === '') semanticPart = `item${itemIndexInFile}`;
-
         const itemId = `${itemOriginatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         let mediaType: MediaType;
         const lowerStreamUrl = streamUrl.toLowerCase();
         const lowerFullTitle = fullTitle.toLowerCase();
         const lowerGroupTitle = (grouptitle || '').toLowerCase();
+        const lowerTvGenre = (tvggenre || '').toLowerCase();
+
         const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
 
         // MediaType Detection Logic (Prioritized)
         if (URL_STREAM_IS_CHANNEL_EXT.some(ext => lowerStreamUrl.endsWith(ext))) {
             mediaType = 'channel';
         } else if (TITLE_PPV_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
-            mediaType = 'channel'; // PPV in title is a strong indicator of a channel
+            mediaType = 'channel';
         } else if (URL_SERIES_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
-            mediaType = 'series';
+            mediaType = 'series'; // Could be anime, will refine below
         } else if (URL_MOVIE_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
-            mediaType = 'movie';
+            mediaType = 'movie'; // Could be anime, will refine below
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
-        } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
-          mediaType = 'movie';
-        } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
-          mediaType = 'series';
-        } else if (isVODStreamByExtension) {
-          if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
-            mediaType = 'series';
-          } else {
-            mediaType = 'movie';
-          }
-        } else if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
-          mediaType = 'series';
-        } else if (TITLE_MOVIE_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
-          mediaType = 'movie';
-        } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
-          mediaType = 'channel';
         } else {
-          // Default: if it has a quality tag, it's more likely a channel. Otherwise, could be movie if not HLS.
-          mediaType = qualityTag || !isVODStreamByExtension ? 'channel' : 'movie';
+          // At this point, it's not definitively a channel by URL or PPV title or group
+          // Now check for Anime before general movie/series
+          if (ANIME_GROUP_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ||
+              ANIME_TITLE_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword)) ||
+              ANIME_GROUP_KEYWORDS.some(keyword => lowerTvGenre.includes(keyword))) {
+            mediaType = 'anime';
+          } else if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+            mediaType = 'series';
+          } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+            mediaType = 'movie';
+          } else if (isVODStreamByExtension) {
+            if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
+              mediaType = 'series';
+            } else {
+              mediaType = 'movie';
+            }
+          } else if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
+            mediaType = 'series';
+          } else if (TITLE_MOVIE_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
+            mediaType = 'movie';
+          } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerFullTitle.includes(keyword))) {
+            mediaType = 'channel';
+          } else {
+            mediaType = qualityTag || !isVODStreamByExtension ? 'channel' : 'movie';
+          }
         }
 
         let finalGenre: string | undefined = undefined;
-        if (mediaType === 'movie' || mediaType === 'series') {
+        // Assign genre for VOD types (movie, series, anime)
+        if (mediaType === 'movie' || mediaType === 'series' || mediaType === 'anime') {
             if (tvggenre && tvggenre.trim() !== '') {
                 finalGenre = tvggenre.trim();
-            } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) && !GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) && !GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+            } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ) {
+                // Use grouptitle as genre if it's not clearly a channel group
                 finalGenre = grouptitle.trim();
             }
         }
@@ -174,14 +185,14 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         const mediaItem: MediaItem = {
           id: itemId,
           type: mediaType,
-          title: fullTitle, // Store the full original title
+          title: fullTitle,
           baseName: baseName,
           qualityTag: qualityTag,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: grouptitle,
+          groupTitle: grouptitle, // Store the raw group-title from M3U
           tvgId: tvgId,
-          genre: finalGenre,
+          genre: finalGenre, // This will be tvg-genre or group-title (for VOD)
           description: currentRawItem.description || `Título: ${fullTitle}. Grupo: ${grouptitle || 'N/A'}. Tipo: ${mediaType}. Qualidade: ${qualityTag || 'N/A'}.`,
           originatingPlaylistId: itemOriginatingPlaylistId,
           originatingPlaylistName: itemOriginatingPlaylistName,
@@ -204,27 +215,28 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
   try {
     const response = await fetch(proxyApiUrl);
     const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
-
     let proxyErrorDetails = 'Não foi possível recuperar detalhes específicos do erro do proxy.';
-    if (!response.ok) {
-      try {
-        const errorData = await response.json();
-        if (errorData && typeof errorData.error === 'string') {
-          proxyErrorDetails = errorData.error;
-        } else if (errorData) {
-          proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
-        }
-      } catch (e) {
-        try {
-            const textError = await response.text();
-            if (textError && textError.trim() !== '') {
-                proxyErrorDetails = `Resposta do Proxy (não-JSON): ${textError.trim()}`;
-            }
-        } catch (textReadError) {
-            // proxyErrorDetails remains as default
-        }
-      }
 
+    if (!response.ok) {
+        try {
+            const errorData = await response.json(); // Try to parse as JSON first
+            if (errorData && typeof errorData.error === 'string') {
+                 proxyErrorDetails = errorData.error;
+            } else if (errorData) { // If it's JSON but not the expected format
+                proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
+            }
+        } catch (e) {
+            // If parsing JSON fails, try to read as text
+            try {
+                const textError = await response.text();
+                if (textError && textError.trim() !== '') {
+                    proxyErrorDetails = `Resposta do Proxy (não-JSON): ${textError.trim()}`;
+                }
+            } catch (textReadError) {
+                // proxyErrorDetails remains as default
+            }
+        }
+      
       let finalDetailedErrorMessage: string;
       if (response.status === 429) {
         finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
@@ -241,8 +253,9 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
     m3uString = await response.text();
   } catch (error: any) {
     if (error instanceof Error && (error.message.includes('O provedor da playlist em') || error.message.includes('Falha ao buscar playlist via proxy'))) {
-        throw error;
+        throw error; // Re-throw specific, already detailed errors
     }
+    // Generic network or proxy internal error
     const networkOrProxyError = `Erro ao conectar ao serviço de proxy interno da aplicação para ${playlistUrl}. Razão: ${error.message || 'Erro de fetch desconhecido'}. Verifique sua conexão de rede e se o proxy da aplicação está funcionando.`;
     console.error(networkOrProxyError, error);
     throw new Error(networkOrProxyError);
