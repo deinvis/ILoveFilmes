@@ -128,13 +128,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   }
                 }}
                 tooltip={item.label}
-                asChild={!hasSubItems} // Button becomes a Slot if no sub-items, so Link is the actual button
+                asChild={!hasSubItems} 
               >
                 {!hasSubItems ? (
                   <Link
                     href={item.href}
-                    passHref // Important for asChild components to pass href correctly
-                    legacyBehavior // Needed when Link is child of asChild component
+                    passHref 
+                    legacyBehavior 
                     onClick={handleLinkClick} 
                   >
                     <a className="flex items-center gap-2 flex-grow">
@@ -146,9 +146,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <>
                     <Link
                       href={item.href}
-                      // passHref // No passHref if Link is not the direct child of an asChild component or is not legacy
-                      legacyBehavior={false} // Default for Next 13+ when children are not just an <a> tag
-                      className="flex items-center gap-2 flex-grow" // Apply flex styles directly
+                      legacyBehavior={false} 
+                      className="flex items-center gap-2 flex-grow" 
                       onClick={handleLinkClick} 
                     >
                       <item.icon className="h-5 w-5" />
@@ -159,9 +158,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0", 
                         openSubmenus[item.value] ? "rotate-180" : ""
                       )}
-                      // Make only the chevron toggle the submenu, not navigate
                       onClick={(e) => { 
-                          e.stopPropagation(); // Prevent Link navigation
+                          e.stopPropagation(); 
                           toggleSubmenu(item.value); 
                       }}
                     />
@@ -177,7 +175,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       <Link href={subItem.href} passHref legacyBehavior>
                         <SidebarMenuButton
                           isActive={pathname === subItem.href}
-                          className="w-full justify-start h-auto py-1.5 text-xs font-normal" // Smaller text for sub-items
+                          className="w-full justify-start h-auto py-1.5 text-xs font-normal" 
                           onClick={() => {
                             if (isMobile) setIsMobileSheetOpen(false);
                           }}
@@ -223,12 +221,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <PlaySquare className="h-8 w-8 text-primary" />
                 <h1 className="text-2xl font-bold">StreamVerse</h1>
               </Link>
-              {/* Icon-only link for collapsed sidebar */}
               <Link href="/app/channels" className="items-center gap-2 hidden group-data-[collapsible=icon]:flex">
                 <PlaySquare className="h-8 w-8 text-primary" />
               </Link>
           </SidebarHeader>
-          <SidebarContent className="flex-grow p-2">
+          <SidebarContent className="p-2"> {/* Removed flex-grow as SidebarContent component already has flex-1 */}
             <NavLinks />
           </SidebarContent>
           <SidebarFooter className="p-4 mt-auto group-data-[collapsible=icon]:hidden">
@@ -248,13 +245,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0">
-                <MobileSheetHeader className="p-4 border-b"> {/* Changed SheetHeader to MobileSheetHeader to avoid conflict */}
+                <MobileSheetHeader className="p-4 border-b"> 
                    <Link href="/app/channels" className="flex items-center gap-2" onClick={() => setIsMobileSheetOpen(false)}>
                       <PlaySquare className="h-8 w-8 text-primary" />
                       <SheetTitle className="text-xl font-bold">StreamVerse</SheetTitle>
                     </Link>
                 </MobileSheetHeader>
-                <nav className="grid gap-1 text-lg font-medium p-2">
+                <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto"> {/* Added flex-grow and overflow-y-auto */}
                   <NavLinks isMobile />
                 </nav>
                  <div className="mt-auto p-4 border-t">
@@ -262,7 +259,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   </div>
               </SheetContent>
             </Sheet>
-             {/* App Title in Mobile Header */}
              <Link href="/app/channels" className="flex items-center gap-2">
                 <PlaySquare className="h-7 w-7 text-primary" />
                 <h1 className="text-xl font-semibold">StreamVerse</h1>
