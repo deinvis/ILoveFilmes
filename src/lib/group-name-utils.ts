@@ -14,10 +14,9 @@ const CANONICAL_LANCAMENTOS_DISPLAY_NAME = "Lançamentos";
 const CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME = "Ficção e Fantasia";
 
 // Patterns to match prefixes like "MOVIES | ", "CHANNELS - ", "SERIES : ", etc.
-// These are very generic and might be applied before type-specific logic if needed,
-// or incorporated into type-specific logic.
+// These are very generic and might be applied before type-specific logic if needed.
 const GENERIC_MEDIA_TYPE_PREFIX_PATTERNS: RegExp[] = [
-  /^(?:filmes?|movies?|s[eé]ries|tvshows?|canais|channels|vod|live|iptv|adulto(?:s)?|kids|infantil|esportes|noticias|document[aá]rios|uhd|fhd|sd|hd|4k|24h|24\/7|desenhos?|todos\s*os\s*g[êe]neros)\s*[|:\-–—]\s*/i,
+  /^(?:todos\s*os\s*g[êe]neros|all\s*genres|categorias?)\s*[|:\-–—]\s*/i,
 ];
 
 /**
@@ -26,6 +25,7 @@ const GENERIC_MEDIA_TYPE_PREFIX_PATTERNS: RegExp[] = [
  * @returns The string without diacritics.
  */
 function removeDiacritics(str: string): string {
+  if (!str) return '';
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
@@ -41,13 +41,10 @@ function smartTitleCase(str: string): string {
   return str
     .split(' ')
     .map(word => {
-      // Keep existing short all-caps words like "AÇÃO", "DC", "UFC", "NBA"
-      // but not very long ones unless they contain numbers like "24 HORAS"
       if (word.length > 1 && word === word.toUpperCase() &&
           (!/\d/.test(word) && word.length <= 5 || /\d/.test(word) && word.length <= 10) ) {
         return word;
       }
-      // Handle words with slashes like "ANIMACAO/INFANTIL" -> "Animacao/Infantil"
       return word.split('/').map(part => {
         if (!part) return '';
         if (part.length > 1 && part === part.toUpperCase() &&
@@ -62,97 +59,101 @@ function smartTitleCase(str: string): string {
 
 
 export function processGroupName(rawName?: string, mediaType?: MediaType): ProcessedGroupName {
-  if (!rawName || rawName.trim() === '') {
-    return {
-      displayName: DEFAULT_GROUP_NAME,
-      normalizedKey: removeDiacritics(DEFAULT_GROUP_NAME.toLowerCase())
-    };
-  }
+  const originalRawName = rawName || DEFAULT_GROUP_NAME;
+  let nameToProcess = originalRawName.trim();
 
-  let nameToProcess = rawName.trim();
-
-  // 1. General prefix stripping (optional, can be aggressive)
-  // For example, if a group is "CHANNELS | ABERTOS", this might strip "CHANNELS | "
-  // For "MOVIES | AÇÃO", this might strip "MOVIES | "
-  let baseNameAfterGenericStrip = nameToProcess;
+  // 1. Remove very generic prefixes that don't add semantic value to the group itself
   for (const pattern of GENERIC_MEDIA_TYPE_PREFIX_PATTERNS) {
     const tempName = nameToProcess.replace(pattern, '').trim();
     if (tempName.length > 0 && tempName.length < nameToProcess.length) {
-      baseNameAfterGenericStrip = tempName;
+      nameToProcess = tempName;
       break; 
     }
   }
-  nameToProcess = baseNameAfterGenericStrip; // Continue processing with potentially stripped name
-
-  // 2. Type-specific cleaning to get the "core" of the group name
+  
   let coreGroupName = nameToProcess;
+  let finalDisplayName = '';
+  let isCanonical = false;
+
+  // 2. Type-specific cleaning to get the "core" of the group name for VOD or pre-process channels
   if (mediaType === 'movie' || mediaType === 'series') {
-    // More aggressive prefix stripping for VOD
-    const typeSpecificPrefixPattern = /^(?:filmes?|movies?|s[eé]ries|tvshows?|vod|cole[çc][ãa]o|categorias?)\s*[|:\-–—]\s*/i;
+    const typeSpecificPrefixPattern = /^(?:filmes?|movies?|s[eé]ries|tvshows?|vod|cole[çc][ãa]o)\s*[|:\-–—]\s*/i;
     const cleaned = coreGroupName.replace(typeSpecificPrefixPattern, '').trim();
-    if (cleaned.length > 0 || coreGroupName.match(typeSpecificPrefixPattern)) { // Apply if pattern matched or something was cleaned
+    if (cleaned.length > 0 || coreGroupName.match(typeSpecificPrefixPattern)) {
         coreGroupName = cleaned;
     }
   } else if (mediaType === 'channel') {
-    // For channels, just remove the pipe separator
-    coreGroupName = coreGroupName.replace(/\s*\|\s*/g, ' ').trim();
-  }
-
-  if (coreGroupName.trim() === '') {
-    coreGroupName = DEFAULT_GROUP_NAME;
-  }
-
-  // 3. Canonicalization (applied to coreGroupName, affects finalDisplayName)
-  let finalDisplayName = coreGroupName;
-  let isCanonical = false;
-  const normalizedCoreForCanonicalCheck = removeDiacritics(coreGroupName.toLowerCase()).trim();
-
-  const lancamentoKeywords = ["lancamento", "estreia", "cinema"];
-  if (lancamentoKeywords.some(kw => normalizedCoreForCanonicalCheck.includes(kw))) {
-    finalDisplayName = CANONICAL_LANCAMENTOS_DISPLAY_NAME;
-    isCanonical = true;
-  } else {
-    const ficcaoFantasiaPatterns = [/^ficcao\s*e\s*fantasia$/, /^ficcao\/fantasia$/, /^fantasia\s*e\s*ficcao$/, /^fantasia\/ficcao$/];
-    if (ficcaoFantasiaPatterns.some(p => p.test(normalizedCoreForCanonicalCheck))) {
-      finalDisplayName = CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME;
-      isCanonical = true;
-    }
-  }
-  
-  // 4. Smart Title Case or Preserve ALL CAPS for the 'core' name (if not canonicalized)
-  if (!isCanonical) {
-    // Use 'nameToProcess' (which is the name *before* VOD specific prefix stripping or channel pipe removal)
-    // for the all-caps check to better reflect original intent if it was like "ALL CAPS GROUP"
-    // but 'coreGroupName' for actual smart title casing.
-    const originalSegmentForAllCapsCheck = nameToProcess; 
-    if (originalSegmentForAllCapsCheck === originalSegmentForAllCapsCheck.toUpperCase() &&
-        originalSegmentForAllCapsCheck.length > 1 &&
-        !/\d/.test(originalSegmentForAllCapsCheck) && // Ignore "4K"
-        originalSegmentForAllCapsCheck.length <= 15) { // Heuristic for intentional all caps
-      finalDisplayName = coreGroupName; // Use the coreGroupName but it will be cased by this rule
-                                        // If coreGroupName was "ABERTOS", it stays "ABERTOS"
+    // For channels, the "core" is what's left after removing "Canais/Canal" and separators
+    // e.g., "Canais | Abertos" -> "Abertos"; "CHILENOS" -> "CHILENOS"
+    const channelPrefixExtractRegex = /^(?:canais|canal)\s*(?:[|i\-–—]\s*)?(.*)$/i;
+    const extractMatch = nameToProcess.match(channelPrefixExtractRegex);
+    
+    if (extractMatch && extractMatch[1] && extractMatch[1].trim() !== "") {
+      coreGroupName = extractMatch[1].trim();
+    } else if (!channelPrefixExtractRegex.test(nameToProcess) && nameToProcess.trim() !== "") {
+      // If it doesn't start with "Canais/Canal" and isn't empty, the whole thing is the core
+      coreGroupName = nameToProcess.trim();
     } else {
-      finalDisplayName = smartTitleCase(coreGroupName);
-    }
-  }
-
-  // 5. Channel-specific prepending (if not canonicalized and applies)
-  if (mediaType === 'channel' && !isCanonical) {
-    const channelKeywords = ['canal', 'canais'];
-    const checkName = removeDiacritics(finalDisplayName.toLowerCase());
-    const containsChannelKeyword = channelKeywords.some(kw => checkName.includes(kw));
-
-    if (!containsChannelKeyword) {
-      finalDisplayName = `Canais ${finalDisplayName}`;
+      // Original was "Canais", "Canal", or "Canais | ", etc.
+      coreGroupName = ""; // This will result in "CANAIS" as display name
     }
   }
   
-  // Default if somehow empty or just 'uncategorized' after processing
-  if (finalDisplayName.trim() === '' || removeDiacritics(finalDisplayName.trim().toLowerCase()) === DEFAULT_GROUP_NAME.toLowerCase()) {
-    finalDisplayName = DEFAULT_GROUP_NAME;
+  // 3. Canonicalization (applied to coreGroupName)
+  if (coreGroupName) {
+    const normalizedCoreForCanonicalCheck = removeDiacritics(coreGroupName.toLowerCase()).trim();
+    const lancamentoKeywords = ["lancamento", "estreia", "cinema"];
+    if (lancamentoKeywords.some(kw => normalizedCoreForCanonicalCheck.includes(kw))) {
+      finalDisplayName = CANONICAL_LANCAMENTOS_DISPLAY_NAME;
+      isCanonical = true;
+    } else {
+      const ficcaoFantasiaPatterns = [/^ficcao\s*e\s*fantasia$/, /^ficcao\/fantasia$/, /^fantasia\s*e\s*ficcao$/, /^fantasia\/ficcao$/];
+      if (ficcaoFantasiaPatterns.some(p => p.test(normalizedCoreForCanonicalCheck))) {
+        finalDisplayName = CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME;
+        isCanonical = true;
+      }
+    }
+  }
+
+  // 4. Final Display Name construction and capitalization
+  if (!isCanonical) {
+    let capitalizedCoreName: string;
+    if (coreGroupName.trim() === '') { // Handle if coreGroupName ended up empty
+        capitalizedCoreName = ''; 
+    } else if (
+      coreGroupName === coreGroupName.toUpperCase() &&
+      coreGroupName.length > 0 &&
+      (!/\d/.test(coreGroupName) && coreGroupName.length <= 15 || /\d/.test(coreGroupName))
+    ) {
+      capitalizedCoreName = coreGroupName;
+    } else {
+      capitalizedCoreName = smartTitleCase(coreGroupName);
+    }
+
+    if (mediaType === 'channel') {
+      if (capitalizedCoreName) {
+        finalDisplayName = `CANAIS ${capitalizedCoreName}`;
+      } else {
+        // If core was empty (e.g., original "Canais" or "Canais | "), display just "CANAIS"
+        finalDisplayName = "CANAIS";
+      }
+    } else { // Movies or Series
+      finalDisplayName = capitalizedCoreName || DEFAULT_GROUP_NAME; // Fallback if core became empty
+    }
   }
   
-  // The normalizedKey should always be based on the finalDisplayName
+  // Default if somehow empty or becomes "Uncategorized" after all processing
+  if (finalDisplayName.trim() === '' || 
+      (removeDiacritics(finalDisplayName.trim().toLowerCase()) === DEFAULT_GROUP_NAME.toLowerCase() && 
+       finalDisplayName !== DEFAULT_GROUP_NAME) // allow "Uncategorized" if it was truly the only name
+      ) {
+    if (mediaType === 'channel') {
+        finalDisplayName = "CANAIS Diversos"; // More specific default for channels
+    } else {
+        finalDisplayName = DEFAULT_GROUP_NAME;
+    }
+  }
+  
   const normalizedKey = removeDiacritics(finalDisplayName.toLowerCase()).trim();
 
   return {
