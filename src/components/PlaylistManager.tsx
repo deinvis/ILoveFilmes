@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { format, parseISO } from 'date-fns';
 import type { PlaylistType, PlaylistItem } from '@/types';
-import { cn } from "@/lib/utils"; // Added import for cn
+import { cn } from "@/lib/utils";
 
 export function PlaylistManager() {
   const [playlistInputType, setPlaylistInputType] = useState<PlaylistType>('m3u');
@@ -48,7 +48,9 @@ export function PlaylistManager() {
 
 
   useEffect(() => {
-    if (playlists.length === 0 && !isLoading) {
+    // Only fetch if client-side and no playlists initially, and not already loading
+    // This avoids fetching on every mount if playlists are already loaded/cached by Zustand
+    if (typeof window !== 'undefined' && playlists.length === 0 && !isLoading) {
       fetchAndParsePlaylists();
     }
   }, [fetchAndParsePlaylists, isLoading, playlists.length]);
@@ -70,10 +72,10 @@ export function PlaylistManager() {
           const fileContent = e.target?.result as string;
           if (fileContent) {
             await addPlaylistFromFileContent(fileContent, newPlaylistName.trim() || selectedFile.name);
-             const currentError = usePlaylistStore.getState().error; 
-             if (currentError) {
+             const currentError = usePlaylistStore.getState().error; // Get fresh error state
+             if (currentError && (currentError.includes(newPlaylistName.trim() || selectedFile.name) || currentError.includes("Falha ao processar playlist de arquivo"))) {
                 toast({ title: "Erro ao adicionar playlist do arquivo", description: currentError, variant: "destructive" });
-             } else {
+             } else if (!currentError) { // Only show success if no error was set by addPlaylistFromFileContent
                 toast({ title: "Sucesso", description: `Playlist do arquivo "${newPlaylistName.trim() || selectedFile.name}" agendada para adição.` });
                 setSelectedFile(null);
                 if (fileInputRef.current) fileInputRef.current.value = '';
@@ -103,8 +105,8 @@ export function PlaylistManager() {
         return;
       }
       try {
-        const parsedDns = new URL(newXcDns);
-        if(!['http:', 'https:',].includes(parsedDns.protocol)){
+        const parsedDns = new URL(newXcDns); // Basic validation for DNS format
+        if(!['http:', 'https:',].includes(parsedDns.protocol)){ // Check for http or https
           toast({ title: "Erro", description: "DNS inválido. Deve começar com http:// ou https://", variant: "destructive" });
           return;
         }
@@ -117,16 +119,18 @@ export function PlaylistManager() {
         xcDns: newXcDns,
         xcUsername: newXcUsername,
         xcPassword: newXcPassword,
-        name: newPlaylistName.trim() || newXcDns,
+        name: newPlaylistName.trim() || newXcDns, // Default name to DNS if not provided
         source: 'url' // XC is always URL based for initial setup
       });
     }
     
+    // Check error state AFTER the async addPlaylist call has completed
     const currentError = usePlaylistStore.getState().error; 
     const lastAddedPlaylistName = newPlaylistName.trim() || (playlistInputType === 'm3u' ? newPlaylistUrl : newXcDns);
 
-    if (currentError && (currentError.includes(newPlaylistUrl) || currentError.includes(newXcDns))) {
-       playlistNameError = true; 
+    // Check if the error message relates to the playlist just attempted
+    if (currentError && (currentError.includes(newPlaylistUrl) || currentError.includes(newXcDns) || currentError.includes(lastAddedPlaylistName))) {
+       playlistNameError = true; // This helps to avoid clearing fields if specific error
        toast({ title: "Erro ao adicionar playlist", description: currentError, variant: "destructive" });
     }
     
@@ -155,11 +159,12 @@ export function PlaylistManager() {
     setEditPlaylistName(playlist.name || '');
     if (playlist.type === 'm3u') {
       setEditPlaylistUrl(playlist.url || ''); // File-based M3Us won't have URLs here for editing.
+      // Clear XC fields for M3U edit dialog
       setEditXcDns('');
       setEditXcUsername('');
       setEditXcPassword('');
     } else if (playlist.type === 'xc') {
-      setEditPlaylistUrl('');
+      setEditPlaylistUrl(''); // Clear M3U URL field for XC edit dialog
       setEditXcDns(playlist.xcDns || '');
       setEditXcUsername(playlist.xcUsername || '');
       setEditXcPassword(playlist.xcPassword || '');
@@ -174,16 +179,18 @@ export function PlaylistManager() {
     let validationError = false;
 
     if (editingPlaylist.type === 'm3u') {
-      if (editingPlaylist.source !== 'file' && !editPlaylistUrl.trim()) { // Only validate URL if it's a URL-based M3U
+      // For M3U, only URL (if source is 'url') and name are editable.
+      // If source is 'file', only name is editable. URL is not present/editable.
+      if (editingPlaylist.source === 'url' && !editPlaylistUrl.trim()) {
         toast({ title: "Erro na Edição", description: "URL da playlist M3U não pode ser vazia.", variant: "destructive" });
         validationError = true;
-      } else if (editingPlaylist.source !== 'file') {
+      } else if (editingPlaylist.source === 'url') {
         try { new URL(editPlaylistUrl); updates.url = editPlaylistUrl; } catch (_) {
           toast({ title: "Erro na Edição", description: "Formato de URL M3U inválido.", variant: "destructive" });
           validationError = true;
         }
       }
-      // For file-based M3U, only name can be edited here. URL/content is not editable.
+      // For file-based M3U, only name can be edited here. URL/content is not editable via this dialog.
     } else if (editingPlaylist.type === 'xc') {
       if (!editXcDns.trim() || !editXcUsername.trim() || !editXcPassword.trim()) {
         toast({ title: "Erro na Edição", description: "DNS, Nome de Usuário e Senha são obrigatórios para Xtream Codes.", variant: "destructive" });
@@ -209,10 +216,11 @@ export function PlaylistManager() {
     if (validationError) return;
 
     await updatePlaylist(editingPlaylist.id, updates);
-    const currentError = usePlaylistStore.getState().error;
+    const currentError = usePlaylistStore.getState().error; // Get fresh error state
+    // Check if the error is related to the updated playlist
     if (currentError && (currentError.includes(editingPlaylist.id) || (updates.url && currentError.includes(updates.url)) || (updates.xcDns && currentError.includes(updates.xcDns)))) {
         toast({ title: "Erro ao atualizar playlist", description: currentError, variant: "destructive" });
-    } else {
+    } else if (!currentError) { // Only show success if no error was set by updatePlaylist
         toast({ title: "Playlist Atualizada", description: `Playlist "${editingPlaylist.name || editingPlaylist.id}" atualizada com sucesso.` });
         setIsEditDialogOpen(false);
         setEditingPlaylist(null);
@@ -230,7 +238,7 @@ export function PlaylistManager() {
           <CardDescription>Adicione ou remova suas fontes de playlist (URL M3U, Xtream Codes ou arquivo M3U).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {error && !isLoading && (
+          {error && !isLoading && ( // Display general error if not loading, but specific errors are toasted
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Erro Geral</AlertTitle>
@@ -291,7 +299,7 @@ export function PlaylistManager() {
                   <Label htmlFor="xc-dns" className="mb-1.5 block text-sm font-medium">DNS do Servidor* (com http/https)</Label>
                   <Input
                     id="xc-dns"
-                    type="url"
+                    type="url" // type="url" for basic validation
                     placeholder="Ex: http://myportal.com:8080"
                     value={newXcDns}
                     onChange={(e) => setNewXcDns(e.target.value)}
