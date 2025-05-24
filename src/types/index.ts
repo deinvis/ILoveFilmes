@@ -9,8 +9,8 @@ export interface PlaylistItem {
   type: PlaylistType;
   name?: string;
   addedAt: string;
-  source?: 'url' | 'file'; // To distinguish between URL-based and file-based M3U lists
-  fileContent?: string; // Store raw M3U content for file-based playlists
+  source?: 'url' | 'file'; // Distinguishes between URL-based and file-based M3U lists
+  // fileContent?: string; // Removed: Do not persist raw file content to avoid quota errors. Session only.
 
   // For M3U type (if source is 'url')
   url?: string;
@@ -27,17 +27,17 @@ export interface PlaylistItem {
 export interface MediaItem {
   id: string;
   type: MediaType;
-  title: string; // Full original title, e.g., "ESPN HD", "GLOBO SP SD"
+  title: string;
   posterUrl?: string;
   streamUrl: string;
   description?: string;
   genre?: string;
-  groupTitle?: string; // This is the group-title from M3U
+  groupTitle?: string;
   tvgId?: string;
   originatingPlaylistId: string;
   originatingPlaylistName?: string;
-  baseName?: string; // Extracted base name, e.g., "ESPN", "GLOBO SP"
-  qualityTag?: string; // Extracted quality, e.g., "SD", "HD"
+  baseName?: string;
+  qualityTag?: string;
 }
 
 export interface EpgProgram {
@@ -58,20 +58,19 @@ export interface PlaybackProgressData {
   duration: number;
 }
 
-// For XC API user info response
 export interface XCUserInfo {
   username?: string;
   password?: string;
   message?: string;
   auth?: number;
   status?: string;
-  exp_date?: string | null; // Unix timestamp or null
+  exp_date?: string | null;
   is_trial?: string;
   active_cons?: string;
   created_at?: string;
   max_connections?: string;
   allowed_output_formats?: string[];
-  [key: string]: any; // For any other properties
+  [key: string]: any;
 }
 
 export interface XCAPIResponse {
