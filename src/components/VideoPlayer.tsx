@@ -108,10 +108,11 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   useEffect(() => {
     console.log(`VideoPlayer: Attempting to load item: "${item.title}", URL: "${item.streamUrl}"`);
-    addRecentlyPlayed(item.id); // Add to recently played when player attempts to load
+    addRecentlyPlayed(item.id);
 
     const videoId = getYouTubeVideoId(item.streamUrl);
     if (videoId) {
+      console.log("VideoPlayer: Detected YouTube video. ID:", videoId);
       setIsYouTube(true);
       setYouTubeVideoId(videoId);
       if (hlsRef.current) {
@@ -155,7 +156,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 console.error('VideoPlayer HLS.js fatal network error:', data.details, 'Attempting to recover...');
-                hls.startLoad(); // Or hls.recoverMediaError() for specific media errors
+                hls.startLoad();
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 console.error('VideoPlayer HLS.js fatal media error:', data.details, 'Attempting to recover...');
@@ -163,8 +164,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
                 break;
               default:
                 console.error('VideoPlayer HLS.js fatal error (other type):', data.type, data.details);
-                // Consider not re-throwing or destroying HLS instance for certain errors
-                // to allow manual recovery or user intervention if possible.
                 break;
             }
           } else {
@@ -177,15 +176,15 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         cleanupVideoEvents = setupVideoEventListeners(videoElement);
       } else {
         console.warn("VideoPlayer: HLS.js is not supported, and native HLS playback is not available for this HLS stream. Playback may fail:", item.streamUrl);
-        videoElement.src = item.streamUrl; // Fallback to trying native playback anyway
+        videoElement.src = item.streamUrl; 
         cleanupVideoEvents = setupVideoEventListeners(videoElement);
       }
     };
 
     const setupDefaultPlayer = () => {
-      console.log("VideoPlayer: Setting up default player for non-HLS stream:", item.streamUrl);
+      console.log("VideoPlayer: Setting up default HTML5 player for non-HLS stream:", item.streamUrl);
       videoElement.src = item.streamUrl;
-      videoElement.preload = "metadata"; // Load only metadata until play is initiated
+      videoElement.preload = "auto"; // Changed from "metadata" to "auto"
       cleanupVideoEvents = setupVideoEventListeners(videoElement);
     };
 
@@ -197,17 +196,18 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      videoElement.load(); // Important to reset the video element state
+      videoElement.load();
 
       const lowerStreamUrl = item.streamUrl.toLowerCase();
-      // Improved HLS stream detection
       const isHlsStream = lowerStreamUrl.includes('.m3u8') || 
-                          lowerStreamUrl.includes('/manifest') || // Common in DASH but sometimes used for HLS proxies
-                          lowerStreamUrl.includes('.isml/manifest'); // Smooth Streaming manifest, sometimes gateway to HLS
+                          lowerStreamUrl.includes('/manifest') || 
+                          lowerStreamUrl.includes('.isml/manifest');
 
       if (isHlsStream) {
+        console.log(`VideoPlayer: Detected HLS stream for ${item.title}`);
         setupHlsPlayer();
       } else {
+        console.log(`VideoPlayer: Detected non-HLS (likely direct) stream for ${item.title}`);
         setupDefaultPlayer();
       }
     }
@@ -225,12 +225,11 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       if (videoElement) {
         videoElement.pause();
         videoElement.removeAttribute('src'); 
-        // Remove event listeners specifically attached here if not covered by cleanupVideoEvents
-        videoElement.load(); // Reset the video element
+        videoElement.load(); 
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item, setupVideoEventListeners, logMediaError, tryPlay, addRecentlyPlayed]); // Added addRecentlyPlayed to dependency array
+  }, [item, setupVideoEventListeners, logMediaError, tryPlay, addRecentlyPlayed]);
 
   if (isYouTube && youTubeVideoId) {
     return (
@@ -255,10 +254,12 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         className="w-full h-full"
         playsInline 
         poster={item.posterUrl}
-        preload="metadata" 
+        preload="auto" // Changed from "metadata"
       >
         Your browser does not support the video tag or the video format.
       </video>
     </div>
   );
 }
+
+    
