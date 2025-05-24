@@ -32,8 +32,10 @@ const QUALITY_TAGS_PATTERNS: { tag: string }[] = [
 ];
 
 // Separators that might be before the quality tag. Ensure regex special chars are escaped.
+// Space is NOT included here as it's handled differently in the main regex logic.
 const SEPARATORS_CHARS = ['|', '-', '–', '—', '(', ')', '[', ']'];
-const SEPARATOR_REGEX_PART = `(?:[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]\\s*|\\s+)`; // Separator char OR just whitespace
+const SPECIAL_SEPARATOR_REGEX_PART = `[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]`;
+
 
 export function extractChannelInfo(title: string): ExtractedChannelInfo {
   if (!title) return { baseName: 'Canal Desconhecido' };
@@ -44,39 +46,41 @@ export function extractChannelInfo(title: string): ExtractedChannelInfo {
     // Regex for the tag itself, allowing for internal spaces in multi-word tags
     const tagRegexPart = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
     
-    // Regex for optional variant suffix (², ³, numbers).
-    // This suffix is PART of the full quality string.
-    const variantSuffixPattern = `(?:[\\s\\d²³]*)`;
+    // Regex for optional variant suffix (², ³, numbers, and spaces within/after them)
+    const variantSuffixPattern = `(?:[\\s\\d²³]*)`; 
 
     // Construct full quality pattern: TAG + optional SUFFIX
-    const fullQualityRegexString = `${tagRegexPart}${variantSuffixPattern}`;
+    const fullQualityPattern = `${tagRegexPart}${variantSuffixPattern}`;
 
-    // Regex 1: Try to match (BASE_NAME) (SEPARATOR_OR_SPACE) (FULL_QUALITY_PATTERN)$
-    const mainRegex = new RegExp(`^(.*?)${SEPARATOR_REGEX_PART}(${fullQualityRegexString})$`, 'i');
-    let match = originalTrimmedTitle.match(mainRegex);
+    // Regex to match: (BaseName)(SeparatorOrSpace)(FullQualityPattern) at the end of the string
+    // Group 1: (.*?) - BaseName (non-greedy)
+    // Group 2: (\\s*(?:${SPECIAL_SEPARATOR_REGEX_PART}|\\s)\\s*) - Separator part: 
+    //          optional leading spaces, then (a special separator char OR a literal space), then optional trailing spaces.
+    //          This group ensures there is *some* form of separation.
+    // Group 3: (${fullQualityPattern}) - The full quality tag pattern
+    const mainRegex = new RegExp(`^(.*?)([\\s]*(${SPECIAL_SEPARATOR_REGEX_PART}|\\s)[\\s]*)(${fullQualityPattern})$`, 'i');
+    
+    const match = originalTrimmedTitle.match(mainRegex);
 
     if (match) {
-      const potentialBaseName = match[1] ? match[1].trim() : '';
-      const matchedFullQuality = match[2].trim(); // This is (tag + suffix)
+      const potentialBaseName = match[1].trim(); // Base Name
+      // const separatorUsed = match[2].trim(); // The actual separator, if needed for debugging
+      const matchedFullQuality = match[4].trim(); // Full Quality Tag (tag + suffix)
 
-      if (potentialBaseName) {
-        // Ensure the baseName isn't empty after trimming
+      if (potentialBaseName) { // Ensure baseName is not empty
         return { baseName: potentialBaseName, qualityTag: matchedFullQuality };
       }
-      // If potentialBaseName is empty here, it means the separator was at the beginning.
-      // e.g. title "| HD". This case should be caught by qualityOnlyRegex below.
     }
 
-    // Regex 2: If the title IS ONLY the full quality pattern (no base name, no preceding separator)
-    const qualityOnlyRegex = new RegExp(`^(${fullQualityRegexString})$`, 'i');
-    match = originalTrimmedTitle.match(qualityOnlyRegex);
-    if (match) {
-      const matchedFullQuality = match[1].trim();
-      // If the entire title is just the quality string, baseName is the title itself.
+    // Fallback: If the entire title is just the quality pattern (e.g., channel named "HD" or "SD²")
+    const qualityOnlyRegex = new RegExp(`^(${fullQualityPattern})$`, 'i');
+    const qualityOnlyMatch = originalTrimmedTitle.match(qualityOnlyRegex);
+    if (qualityOnlyMatch) {
+      const matchedFullQuality = qualityOnlyMatch[1].trim();
       return { baseName: originalTrimmedTitle, qualityTag: matchedFullQuality };
     }
   }
 
-  // If no specific quality tag pattern found after all iterations
+  // If no quality tag from the list is successfully extracted
   return { baseName: originalTrimmedTitle, qualityTag: undefined };
 }
