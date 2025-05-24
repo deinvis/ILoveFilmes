@@ -31,7 +31,8 @@ export default function PlayerPage() {
     isFavorite,
     epgData,
     epgLoading,
-    fetchAndParseEpg
+    fetchAndParseEpg,
+    addRecentlyPlayed // Ensure addRecentlyPlayed is available
   } = usePlaylistStore();
   
   const [itemToPlay, setItemToPlay] = useState<MediaItem | null | undefined>(undefined);
@@ -60,13 +61,16 @@ export default function PlayerPage() {
     if (mediaItems.length > 0) {
       const foundItem = mediaItems.find(item => item.id === decodeURIComponent(itemId));
       setItemToPlay(foundItem || null);
+      if (foundItem) {
+        addRecentlyPlayed(foundItem.id); // Add to recent when item is set
+      }
     } else if (!storeIsLoading) { 
        setItemToPlay(null);
     }
-  }, [isClient, itemId, mediaItems, storeIsLoading]);
+  }, [isClient, itemId, mediaItems, storeIsLoading, addRecentlyPlayed]);
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
-    if (itemType !== 'channel' || !tvgId || !epgData[tvgId] || epgLoading) return null;
+    if (itemToPlay?.type !== 'channel' || !tvgId || !epgData[tvgId] || epgLoading) return null;
     const now = new Date();
     return epgData[tvgId]?.find(prog => now >= prog.start && now < prog.end) || null;
   };
@@ -76,7 +80,8 @@ export default function PlayerPage() {
       return getNowPlaying(itemToPlay.tvgId);
     }
     return null;
-  }, [itemToPlay, epgData, epgLoading, getNowPlaying]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemToPlay, epgData, epgLoading]); // getNowPlaying can be omitted if stable
 
 
   const PageIcon = itemToPlay && itemToPlay.type ? MEDIA_TYPE_ICONS[itemToPlay.type] : Film;
@@ -113,12 +118,12 @@ export default function PlayerPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-4">
         <AlertTriangle className="w-16 h-16 text-destructive mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Media Not Found</h2>
+        <h2 className="text-2xl font-semibold mb-2">Mídia Não Encontrada</h2>
         <p className="text-muted-foreground mb-6">
-          The requested media item could not be found in your playlists.
+          O item de mídia solicitado não pôde ser encontrado em suas playlists.
         </p>
         <Button onClick={() => router.back()}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+          <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
         </Button>
       </div>
     );
@@ -127,7 +132,7 @@ export default function PlayerPage() {
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-6">
       <Button variant="outline" onClick={() => router.back()} className="mb-2">
-        <ArrowLeft className="mr-2 h-4 w-4" /> Back to {itemToPlay.type}s
+        <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para {itemToPlay.type === 'channel' ? 'Canais' : itemToPlay.type === 'movie' ? 'Filmes' : 'Séries'}
       </Button>
       
       <Card className="overflow-hidden shadow-xl">
@@ -141,26 +146,23 @@ export default function PlayerPage() {
               
               {itemToPlay.type === 'channel' && nowPlayingProgram && (
                 <CardDescription className="text-md mt-1 flex items-center text-primary">
-                   <Clock className="mr-2 h-4 w-4" /> Now Playing: {nowPlayingProgram.title}
+                   <Clock className="mr-2 h-4 w-4" /> No Ar: {nowPlayingProgram.title}
                 </CardDescription>
               )}
 
-              {/* Display Genre first if available (from tvg-genre or fallback for VOD) */}
               {itemToPlay.genre && (itemToPlay.type === 'movie' || itemToPlay.type === 'series') && (
                 <CardDescription className="text-md mt-1">
-                  Genre: {itemToPlay.genre}
+                  Gênero: {itemToPlay.genre}
                 </CardDescription>
               )}
-              {/* Display GroupTitle if it exists and is different from genre (could be collection name) */}
               {itemToPlay.groupTitle && itemToPlay.genre !== itemToPlay.groupTitle && (itemToPlay.type === 'movie' || itemToPlay.type === 'series') && (
                  <CardDescription className="text-sm text-muted-foreground mt-1">
-                  (Group: {itemToPlay.groupTitle})
+                  (Grupo: {itemToPlay.groupTitle})
                 </CardDescription>
               )}
-              {/* For channels, display groupTitle if available (EPG info handled above) */}
               {itemToPlay.type === 'channel' && itemToPlay.groupTitle && (
                  <CardDescription className="text-md mt-1">
-                  Group: {itemToPlay.groupTitle}
+                  Grupo: {itemToPlay.groupTitle}
                 </CardDescription>
               )}
             </div>
@@ -168,22 +170,22 @@ export default function PlayerPage() {
               variant="ghost"
               size="icon"
               onClick={() => toggleFavorite(itemToPlay.id)}
-              title={isItemFavorite ? "Remove from Favorites" : "Add to Favorites"}
-              className="ml-4 shrink-0" // Added shrink-0
+              title={isItemFavorite ? "Remover dos Favoritos" : "Adicionar aos Favoritos"}
+              className="ml-4 shrink-0"
             >
               <Heart className={cn("h-6 w-6", isItemFavorite ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          <VideoPlayer item={itemToPlay} />
+          <VideoPlayer key={itemToPlay.id} item={itemToPlay} />
         </CardContent>
       </Card>
       
       {itemToPlay.description && (
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="text-2xl">Description</CardTitle>
+            <CardTitle className="text-2xl">Descrição</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground whitespace-pre-wrap">{itemToPlay.description}</p>
