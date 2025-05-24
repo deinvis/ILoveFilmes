@@ -1,7 +1,7 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 500; // Limite para não sobrecarregar
+const MAX_ITEMS_PER_PLAYLIST = 1500; // Limite para não sobrecarregar
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 
 // Keywords for URL-based categorization (high priority)
@@ -51,62 +51,53 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         attributesString = infoLineContent.substring(0, lastCommaIndex);
         extinfTitle = infoLineContent.substring(lastCommaIndex + 1).trim();
       } else {
-        // Handle cases where there might be no attributes, just a title, or only attributes
-        if (!attributesString.includes('=')) { // No attributes, only title
+        if (!attributesString.includes('=')) { 
             extinfTitle = attributesString;
             attributesString = ""; 
         }
-        // If attributesString contains '=' it means it's all attributes, title is missing or part of them
       }
 
-      // Default title from EXTINF line
       currentRawItem.title = extinfTitle;
 
       const attributeRegex = /(\S+?)="([^"]*)"/g;
       let match;
       while ((match = attributeRegex.exec(attributesString)) !== null) {
-        const key = match[1].toLowerCase().replace(/-/g, ''); // tvg-id -> tvgid
+        const key = match[1].toLowerCase().replace(/-/g, '');
         const value = match[2].trim();
         currentRawItem[key] = value;
       }
       
-      // Prioritize tvg-name for title, then extinfTitle
       if (currentRawItem.tvgname && currentRawItem.tvgname.trim() !== '') {
         currentRawItem.title = currentRawItem.tvgname.trim();
       } else if (currentRawItem.title && currentRawItem.title.trim() !== '') {
-        // Title already set from extinfTitle, keep it
         currentRawItem.title = currentRawItem.title.trim();
       } else {
-        currentRawItem.title = 'Item Sem Título'; // Fallback if no title found
+        currentRawItem.title = 'Item Sem Título'; 
       }
 
-      // Standardize tvgId
       if (currentRawItem.tvgid && !currentRawItem.tvgId) { 
           currentRawItem.tvgId = currentRawItem.tvgid;
       }
 
-      // Set poster URL
       if (currentRawItem.tvglogo) {
         currentRawItem.posterUrl = currentRawItem.tvglogo;
       }
 
     } else if (line && !line.startsWith('#')) {
-      // This is the stream URL line
-      if (currentRawItem.title ) { // Ensure we have a title to associate the URL with
+      if (currentRawItem.title ) { 
         const streamUrl = line;
         const {
           posterUrl,
-          grouptitle, // Keep as is from M3U
-          tvggenre,   // Keep as is from M3U (for movie/series genre)
-          tvgId,      // Standardized tvgId
-          originatingPlaylistId: itemOriginatingPlaylistId, // Already set
-          originatingPlaylistName: itemOriginatingPlaylistName // Already set
+          grouptitle, 
+          tvggenre,  
+          tvgId,      
+          originatingPlaylistId: itemOriginatingPlaylistId, 
+          originatingPlaylistName: itemOriginatingPlaylistName 
         } = currentRawItem;
 
-        const finalTitle = currentRawItem.title; // This is already prioritized (tvg-name or extinf title)
+        const finalTitle = currentRawItem.title; 
 
-        // Generate a unique ID for the media item
-        const itemIndexInFile = items.length; // Unique index within this specific parse run
+        const itemIndexInFile = items.length; 
         let semanticPart = tvgId || currentRawItem.tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
         if (semanticPart.length === 0 || semanticPart.trim() === '') semanticPart = `item${itemIndexInFile}`; 
         
@@ -146,16 +137,14 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          mediaType = 'channel'; // Default to channel
+          mediaType = 'channel'; 
         }
 
-        // Determine genre (specific for movies and series)
         let finalGenre: string | undefined = undefined;
         if (mediaType === 'movie' || mediaType === 'series') {
             if (tvggenre && tvggenre.trim() !== '') {
                 finalGenre = tvggenre.trim();
             } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) { 
-                // Use group-title as genre if tvg-genre is absent AND group-title doesn't look like a channel group
                 finalGenre = grouptitle.trim();
             }
         }
@@ -166,15 +155,15 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
           title: finalTitle,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: grouptitle, // This is the raw group-title for grouping on main pages
+          groupTitle: grouptitle, 
           tvgId: tvgId, 
-          genre: finalGenre, // Specific genre for VOD, derived from tvg-genre or group-title
+          genre: finalGenre, 
           description: currentRawItem.description || `Título: ${finalTitle}. Grupo: ${grouptitle || 'N/A'}. Tipo: ${mediaType}. Analisado da playlist: ${playlistName || playlistId}`,
           originatingPlaylistId: itemOriginatingPlaylistId,
           originatingPlaylistName: itemOriginatingPlaylistName,
         };
         items.push(mediaItem);
-        currentRawItem = {}; // Reset for the next item
+        currentRawItem = {}; 
       }
     }
   }
@@ -183,7 +172,6 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
 }
 
 
-// Function to fetch and parse M3U from a URL via proxy
 export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: string, playlistName?: string): Promise<MediaItem[]> {
   console.log(`Buscando e analisando M3U via proxy para playlist ID: ${playlistId} (Nome: ${playlistName || 'N/A'}), URL Original: ${playlistUrl}. Limite de itens: ${MAX_ITEMS_PER_PLAYLIST}`);
   let m3uString: string;
@@ -196,26 +184,25 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
     let proxyErrorDetails = 'Não foi possível recuperar detalhes específicos do erro do proxy.';
     if (!response.ok) {
       try {
-        const errorData = await response.json(); // Try to parse as JSON first
+        const errorData = await response.json(); 
         if (errorData && typeof errorData.error === 'string') {
           proxyErrorDetails = errorData.error;
-        } else if (errorData) { // If it's JSON but not the expected format
+        } else if (errorData) { 
           proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
         }
-      } catch (e) { // If parsing as JSON fails, try to read as text
+      } catch (e) { 
         try {
             const textError = await response.text();
             if (textError && textError.trim() !== '') {
                 proxyErrorDetails = `Resposta do Proxy (não-JSON): ${textError.trim()}`;
             }
         } catch (textReadError) {
-            // proxyErrorDetails remains as default
         }
       }
 
       let finalDetailedErrorMessage: string;
       if (response.status === 429) {
-        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Mensagem do proxy: ${proxyErrorDetails})`;
+        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
         console.warn(finalDetailedErrorMessage);
       } else if (response.status === 503) {
          finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está atualmente indisponível (HTTP 503 Service Unavailable). Isso geralmente significa que o servidor externo está temporariamente fora do ar ou sobrecarregado. Por favor, tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
@@ -228,11 +215,9 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
     }
     m3uString = await response.text();
   } catch (error: any) {
-    // If the error is already one of our custom, more descriptive messages, re-throw it.
     if (error instanceof Error && (error.message.includes('O provedor da playlist em') || error.message.includes('Falha ao buscar playlist via proxy'))) {
         throw error; 
     }
-    // For generic fetch errors (e.g., network down, proxy itself unreachable)
     const networkOrProxyError = `Erro ao conectar ao serviço de proxy interno da aplicação para ${playlistUrl}. Razão: ${error.message || 'Erro de fetch desconhecido'}.`;
     console.error(networkOrProxyError, error);
     throw new Error(networkOrProxyError);
@@ -240,3 +225,4 @@ export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: strin
 
   return parseM3UContent(m3uString, playlistId, playlistName);
 }
+
