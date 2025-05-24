@@ -5,7 +5,7 @@
 
 export interface ExtractedChannelInfo {
   baseName: string;
-  qualityTag?: string;
+  qualityTag?: string; // This will now be the full suffix, e.g., "RJ SD", "FHD H265²"
 }
 
 // Order matters: more specific/longer tags first
@@ -32,55 +32,104 @@ const QUALITY_TAGS_PATTERNS: { tag: string }[] = [
 ];
 
 // Separators that might be before the quality tag. Ensure regex special chars are escaped.
-// Space is NOT included here as it's handled differently in the main regex logic.
 const SEPARATORS_CHARS = ['|', '-', '–', '—', '(', ')', '[', ']'];
 const SPECIAL_SEPARATOR_REGEX_PART = `[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]`;
 
+const REGIONAL_INDICATORS_ORDERED: string[] = [ // Order from more specific/longer if needed
+  "RJ", "SP", "MG", "RS", "PR", "SC", "BA", "CE", "PE", "DF", "ES", "GO", "MA", "MT", "MS", "PA", "PB", "PI", "RN", "RO", "RR", "SE", "TO", "AM", "AC", "AP",
+  "POA", "SSA", "REC", "BH", "CUR", "FLN", "CAMPINAS",
+  "NACIONAL", "LOCAL", "SAT", "REGIONAL"
+].map(r => r.toUpperCase()); // Ensure uppercase
+
 
 export function extractChannelInfo(title: string): ExtractedChannelInfo {
-  if (!title) return { baseName: 'Canal Desconhecido' };
+  if (!title) return { baseName: 'Canal Desconhecido', qualityTag: undefined };
   const originalTrimmedTitle = title.trim();
 
+  let nameAfterQualityStrip = originalTrimmedTitle;
+  let coreQualityWithVariant: string | undefined = undefined;
+
+  // 1. Extract Core Quality + Variant Suffix from the end
   for (const pattern of QUALITY_TAGS_PATTERNS) {
     const tag = pattern.tag;
-    // Regex for the tag itself, allowing for internal spaces in multi-word tags
     const tagRegexPart = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-    
-    // Regex for optional variant suffix (², ³, numbers, and spaces within/after them)
-    const variantSuffixPattern = `(?:[\\s\\d²³]*)`; 
+    const variantSuffixPattern = `(?:[\\s\\d²³]*)`;
+    const fullQualityPatternString = `${tagRegexPart}${variantSuffixPattern}`;
 
-    // Construct full quality pattern: TAG + optional SUFFIX
-    const fullQualityPattern = `${tagRegexPart}${variantSuffixPattern}`;
-
-    // Regex to match: (BaseName)(SeparatorOrSpace)(FullQualityPattern) at the end of the string
-    // Group 1: (.*?) - BaseName (non-greedy)
-    // Group 2: (\\s*(?:${SPECIAL_SEPARATOR_REGEX_PART}|\\s)\\s*) - Separator part: 
-    //          optional leading spaces, then (a special separator char OR a literal space), then optional trailing spaces.
-    //          This group ensures there is *some* form of separation.
-    // Group 3: (${fullQualityPattern}) - The full quality tag pattern
-    const mainRegex = new RegExp(`^(.*?)([\\s]*(${SPECIAL_SEPARATOR_REGEX_PART}|\\s)[\\s]*)(${fullQualityPattern})$`, 'i');
-    
-    const match = originalTrimmedTitle.match(mainRegex);
+    // Regex: (Anything)(Optional Separator OR Just Space)(FullQualityPattern)$
+    // Group 1: (.*?) - Potential nameBeforeQuality (non-greedy)
+    // Group 2: (\\s*(?:${SPECIAL_SEPARATOR_REGEX_PART}|\\s+)?\\s*) - Optional Separator or just spaces
+    // Group 4: (${fullQualityPatternString}) - The full quality tag pattern itself
+    const qualityRegex = new RegExp(`^(.*?)([\\s]*(${SPECIAL_SEPARATOR_REGEX_PART}|\\s+)?\\s*)(${fullQualityPatternString})$`, 'i');
+    const match = nameAfterQualityStrip.match(qualityRegex);
 
     if (match) {
-      const potentialBaseName = match[1].trim(); // Base Name
-      // const separatorUsed = match[2].trim(); // The actual separator, if needed for debugging
-      const matchedFullQuality = match[4].trim(); // Full Quality Tag (tag + suffix)
+      const potentialNamePart = match[1].trim();
+      const separatorOrSpace = match[2]; 
+      const matchedQuality = match[4].trim();
 
-      if (potentialBaseName) { // Ensure baseName is not empty
-        return { baseName: potentialBaseName, qualityTag: matchedFullQuality };
+      if (potentialNamePart || (separatorOrSpace && separatorOrSpace.trim() !== '')) {
+        nameAfterQualityStrip = potentialNamePart;
+        coreQualityWithVariant = matchedQuality;
+        break; 
       }
-    }
-
-    // Fallback: If the entire title is just the quality pattern (e.g., channel named "HD" or "SD²")
-    const qualityOnlyRegex = new RegExp(`^(${fullQualityPattern})$`, 'i');
-    const qualityOnlyMatch = originalTrimmedTitle.match(qualityOnlyRegex);
-    if (qualityOnlyMatch) {
-      const matchedFullQuality = qualityOnlyMatch[1].trim();
-      return { baseName: originalTrimmedTitle, qualityTag: matchedFullQuality };
+    } else {
+      const qualityOnlyRegex = new RegExp(`^(${fullQualityPatternString})$`, 'i');
+      if (nameAfterQualityStrip.match(qualityOnlyRegex)) {
+        coreQualityWithVariant = nameAfterQualityStrip.trim();
+        nameAfterQualityStrip = ""; 
+        break;
+      }
     }
   }
 
-  // If no quality tag from the list is successfully extracted
-  return { baseName: originalTrimmedTitle, qualityTag: undefined };
+  let currentBaseName = nameAfterQualityStrip.trim();
+  let extractedRegionalModifier: string | undefined = undefined;
+
+  // 2. Extract Regional Modifier from the end of `currentBaseName` (which is nameAfterQualityStrip)
+  if (currentBaseName) {
+    const words = currentBaseName.split(/\s+/);
+    if (words.length > 0) {
+      const lastWord = words[words.length - 1].toUpperCase();
+      // Check if the last word is a known regional indicator
+      if (REGIONAL_INDICATORS_ORDERED.includes(lastWord)) {
+        // Only strip if it's not the only word making up 'currentBaseName'
+        // OR if coreQualityWithVariant exists (e.g. "RJ SD" -> currentBaseName="RJ", coreQuality="SD")
+        if (words.length > 1 || coreQualityWithVariant) {
+          extractedRegionalModifier = words.pop()?.trim(); // remove and get it
+          currentBaseName = words.join(" ").trim();
+        }
+        // If words.length was 1 and it's regional (e.g. currentBaseName="RJ"),
+        // currentBaseName remains "RJ", extractedRegionalModifier becomes "RJ"
+        // This will be handled by displayQualityTag construction.
+         else if (words.length === 1) {
+            extractedRegionalModifier = lastWord;
+            // currentBaseName is already lastWord
+        }
+      }
+    }
+  }
+
+  // Construct the final display qualityTag
+  let displayQualityTag: string | undefined = undefined;
+  if (extractedRegionalModifier && coreQualityWithVariant) {
+    displayQualityTag = `${extractedRegionalModifier} ${coreQualityWithVariant}`;
+  } else if (coreQualityWithVariant) {
+    displayQualityTag = coreQualityWithVariant;
+  } else if (extractedRegionalModifier) {
+    displayQualityTag = extractedRegionalModifier;
+  }
+
+  // Finalize baseName
+  // If currentBaseName is empty, it means the original title was entirely quality/regional parts.
+  // In this scenario, the original title itself should be considered the baseName.
+  if (currentBaseName === "" && originalTrimmedTitle !== "") {
+    currentBaseName = originalTrimmedTitle;
+    // If the whole title was just a quality/regional tag, that tag is the qualityTag
+    // This is implicitly covered as displayQualityTag would be populated.
+    // Example: Title "HD". coreQualityWithVariant="HD". currentBaseName becomes "HD". displayQualityTag="HD".
+    // Example: Title "RJ SD". core="SD", regional="RJ". currentBaseName becomes "RJ SD". displayQualityTag="RJ SD".
+  }
+
+  return { baseName: currentBaseName.trim(), qualityTag: displayQualityTag?.trim() };
 }
