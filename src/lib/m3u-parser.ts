@@ -1,81 +1,28 @@
 
 import type { MediaItem, MediaType } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 5000;
+const MAX_ITEMS_PER_PLAYLIST = 100; // Limite para não sobrecarregar
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 
 // Keywords for URL-based categorization (high priority)
-const URL_SERIES_KEYWORDS = ['/series/']; // More specific, with slashes
+const URL_SERIES_KEYWORDS = ['/series/'];
 const URL_MOVIE_KEYWORDS = ['/movies/', '/movie/'];
 
 // Keywords for group-title based categorization
-const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados'];
-const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes'];
-const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal'];
+const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados', 'lançamentos'];
+const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes', 'anime'];
+const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal', 'esportes', 'noticias', 'infantil', 'documentarios', 'adulto'];
 
-// Keywords for title-based categorization (lower priority)
+// Keywords for title-based categorization
 const TITLE_PPV_KEYWORDS = ['ppv'];
 const TITLE_SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
-const TITLE_MOVIE_KEYWORDS = ['movie', 'film', 'pelicula']; // General movie terms
-const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow', 'anime']; // General series terms (lower priority than pattern)
-const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal'];
+const TITLE_MOVIE_KEYWORDS = ['movie', 'film', 'pelicula'];
+const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow']; // anime is handled by group title
+const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ao vivo'];
 
-
-export async function parseM3U(playlistUrl: string, playlistId: string, playlistName?: string): Promise<MediaItem[]> {
-  console.log(`Buscando e analisando M3U via proxy para playlist ID: ${playlistId} (Nome: ${playlistName || 'N/A'}), URL Original: ${playlistUrl}. Limite de itens: ${MAX_ITEMS_PER_PLAYLIST}`);
-  let m3uString: string;
-  const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(playlistUrl)}`;
-
-  try {
-    const response = await fetch(proxyApiUrl);
-
-    if (!response.ok) {
-      let proxyErrorDetails = 'Não foi possível recuperar detalhes específicos do erro do proxy.';
-      try {
-        const errorData = await response.json();
-        if (errorData && typeof errorData.error === 'string') {
-          proxyErrorDetails = errorData.error;
-        } else if (errorData) {
-          proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
-        }
-      } catch (e) {
-        try {
-            const textError = await response.text();
-            if (textError && textError.trim() !== '') {
-                proxyErrorDetails = `Resposta do Proxy (não-JSON): ${textError.trim()}`;
-            } else {
-                proxyErrorDetails = 'Proxy não retornou uma resposta JSON, e o corpo do erro estava vazio ou ilegível.';
-            }
-        } catch (textReadError) {
-            proxyErrorDetails = 'Proxy não retornou uma resposta JSON, e tentar ler seu corpo como texto também falhou.';
-        }
-      }
-
-      let finalDetailedErrorMessage: string;
-      const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
-
-      if (response.status === 429) {
-        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Mensagem do proxy: ${proxyErrorDetails})`;
-        console.warn(finalDetailedErrorMessage); // Log as warning
-      } else if (response.status === 503) {
-         finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está atualmente indisponível (HTTP 503 Service Unavailable). Isso geralmente significa que o servidor externo está temporariamente fora do ar ou sobrecarregado. Por favor, tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
-         console.warn(finalDetailedErrorMessage); // Log as warning
-      } else {
-        finalDetailedErrorMessage = `Falha ao buscar playlist via proxy (${upstreamStatusDescription}). Detalhes do proxy: ${proxyErrorDetails}. Original URL: ${playlistUrl}`;
-        console.error(finalDetailedErrorMessage); // Log as error for other failures
-      }
-      throw new Error(finalDetailedErrorMessage);
-    }
-    m3uString = await response.text();
-  } catch (error: any) {
-    if (error instanceof Error && (error.message.includes('O provedor da playlist em') || error.message.includes('Falha ao buscar playlist via proxy'))) {
-        throw error; // Re-throw if it's one of our specific messages
-    }
-    const networkOrProxyError = `Erro ao conectar ao serviço de proxy interno da aplicação para ${playlistUrl}. Razão: ${error.message || 'Erro de fetch desconhecido'}.`;
-    console.error(networkOrProxyError, error);
-    throw new Error(networkOrProxyError);
-  }
-
+export function parseM3UContent(m3uString: string, playlistId: string, playlistName?: string): MediaItem[] {
+  console.log(`Analisando conteúdo M3U para playlist ID: ${playlistId} (Nome: ${playlistName || 'N/A'}). Limite de itens: ${MAX_ITEMS_PER_PLAYLIST}`);
+  
   const lines = m3uString.split(/\r?\n/);
   const items: MediaItem[] = [];
   let currentRawItem: Record<string, any> = {};
@@ -132,7 +79,6 @@ export async function parseM3U(playlistUrl: string, playlistId: string, playlist
           currentRawItem.tvgId = currentRawItem.tvgid;
       }
 
-
       if (currentRawItem.tvglogo) {
         currentRawItem.posterUrl = currentRawItem.tvglogo;
       }
@@ -151,9 +97,10 @@ export async function parseM3U(playlistUrl: string, playlistId: string, playlist
 
         const finalTitle = currentRawItem.title;
 
-        const itemIndexInFile = items.length;
+        const itemIndexInFile = items.length; // Unique index within this specific parse run
         let semanticPart = tvgId || currentRawItem.tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
-        if (semanticPart.length === 0) semanticPart = `item${itemIndexInFile}`; 
+        if (semanticPart.length === 0 || semanticPart.trim() === '') semanticPart = `item${itemIndexInFile}`; 
+        
         const itemId = `${itemOriginatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         let mediaType: MediaType;
@@ -170,7 +117,7 @@ export async function parseM3U(playlistUrl: string, playlistId: string, playlist
         } else if (URL_MOVIE_KEYWORDS.some(keyword => lowerStreamUrl.includes(keyword))) {
             mediaType = 'movie';
         } else if (TITLE_PPV_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
-            mediaType = 'channel';
+            mediaType = 'channel'; // PPV in title implies channel, takes precedence over "SERIE B" type names
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
         } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
@@ -220,6 +167,62 @@ export async function parseM3U(playlistUrl: string, playlistId: string, playlist
       }
     }
   }
-  console.log(`Analisados ${items.length} itens da URL original: ${playlistUrl} (Playlist: ${playlistName || playlistId})`);
+  console.log(`Analisados ${items.length} itens para playlist ID: ${playlistId} (Nome: ${playlistName || 'N/A'})`);
   return items;
+}
+
+
+export async function fetchAndParseM3UUrl(playlistUrl: string, playlistId: string, playlistName?: string): Promise<MediaItem[]> {
+  console.log(`Buscando e analisando M3U via proxy para playlist ID: ${playlistId} (Nome: ${playlistName || 'N/A'}), URL Original: ${playlistUrl}. Limite de itens: ${MAX_ITEMS_PER_PLAYLIST}`);
+  let m3uString: string;
+  const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(playlistUrl)}`;
+
+  try {
+    const response = await fetch(proxyApiUrl);
+    const upstreamStatusDescription = `${response.status}${response.statusText ? ' ' + response.statusText.trim() : ''}`;
+
+    if (!response.ok) {
+      let proxyErrorDetails = 'Não foi possível recuperar detalhes específicos do erro do proxy.';
+      try {
+        const errorData = await response.json();
+        if (errorData && typeof errorData.error === 'string') {
+          proxyErrorDetails = errorData.error;
+        } else if (errorData) {
+          proxyErrorDetails = `Proxy retornou um formato de erro JSON inesperado: ${JSON.stringify(errorData)}`;
+        }
+      } catch (e) {
+        try {
+            const textError = await response.text();
+            if (textError && textError.trim() !== '') {
+                proxyErrorDetails = `Resposta do Proxy (não-JSON): ${textError.trim()}`;
+            }
+        } catch (textReadError) {
+            // proxyErrorDetails remains as default
+        }
+      }
+
+      let finalDetailedErrorMessage: string;
+      if (response.status === 429) {
+        finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está limitando as requisições (HTTP 429 Too Many Requests). Isso significa que você tentou carregá-la muitas vezes em um curto período. Por favor, espere um pouco e tente novamente mais tarde. (Mensagem do proxy: ${proxyErrorDetails})`;
+        console.warn(finalDetailedErrorMessage);
+      } else if (response.status === 503) {
+         finalDetailedErrorMessage = `O provedor da playlist em "${playlistUrl}" está atualmente indisponível (HTTP 503 Service Unavailable). Isso geralmente significa que o servidor externo está temporariamente fora do ar ou sobrecarregado. Por favor, tente novamente mais tarde. (Detalhes do proxy: ${proxyErrorDetails})`;
+         console.warn(finalDetailedErrorMessage);
+      } else {
+        finalDetailedErrorMessage = `Falha ao buscar playlist via proxy (${upstreamStatusDescription}). Detalhes do proxy: ${proxyErrorDetails}. URL Original: ${playlistUrl}`;
+        console.error(finalDetailedErrorMessage);
+      }
+      throw new Error(finalDetailedErrorMessage);
+    }
+    m3uString = await response.text();
+  } catch (error: any) {
+    if (error instanceof Error && (error.message.includes('O provedor da playlist em') || error.message.includes('Falha ao buscar playlist via proxy'))) {
+        throw error; 
+    }
+    const networkOrProxyError = `Erro ao conectar ao serviço de proxy interno da aplicação para ${playlistUrl}. Razão: ${error.message || 'Erro de fetch desconhecido'}.`;
+    console.error(networkOrProxyError, error);
+    throw new Error(networkOrProxyError);
+  }
+
+  return parseM3UContent(m3uString, playlistId, playlistName);
 }

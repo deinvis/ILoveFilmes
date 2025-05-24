@@ -14,7 +14,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarInset,
-  SidebarMenuSkeleton, // Import skeleton
+  SidebarMenuSkeleton, 
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -61,14 +61,10 @@ const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?
 };
 
 
-const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
+const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, closeMobileSheet?: () => void }) => {
   const pathname = usePathname();
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
-  const [isMobileSheetOpen, setIsMobileSheetOpen] = usePlaylistStore(state => [ // Assuming Sheet open state is managed globally or passed down
-    (state as any).isMobileSheetOpen, // Example, adjust if state is named differently
-    (state as any).setIsMobileSheetOpen
-  ], () => true); // Zustand shallow compare
-
+  
   const { mediaItems } = usePlaylistStore();
 
   const subcategories = useMemo(() => {
@@ -114,9 +110,9 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
     setOpenSubmenus(prev => ({ ...prev, [itemValue]: !prev[itemValue] }));
   };
   
-  const closeMobileSheet = () => {
-    if (isMobile && setIsMobileSheetOpen && typeof setIsMobileSheetOpen === 'function') {
-      setIsMobileSheetOpen(false);
+  const handleLinkClickAndCloseSheet = () => {
+    if (isMobile && closeMobileSheet) {
+      closeMobileSheet();
     }
   }
 
@@ -127,9 +123,9 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
         const hasSubItems = categorySubItems.length > 0;
         const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
         
-        const handleLinkClick = () => {
+        const handleMainItemClick = () => {
           if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
-            closeMobileSheet();
+            handleLinkClickAndCloseSheet();
           }
         };
 
@@ -143,8 +139,8 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
                   if (hasSubItems) {
                     toggleSubmenu(item.value);
                   }
-                  if (!hasSubItems) { // Only close sheet if it's a direct link, not expanding a submenu
-                    handleLinkClick();
+                  if (!hasSubItems) { 
+                    handleMainItemClick();
                   }
                 }}
                 tooltip={item.label}
@@ -154,11 +150,11 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
                   <Link
                     href={item.href}
                     passHref 
-                    legacyBehavior={false} // Use false for modern Next.js Link behavior
-                    onClick={handleLinkClick} 
-                    className="flex items-center gap-2 flex-grow" // Apply styles directly to Link for asChild false
+                    legacyBehavior={false}
+                    onClick={handleMainItemClick} 
+                    className="flex items-center flex-grow" 
                   >
-                    <item.icon className="h-5 w-5" />
+                    <item.icon className="h-5 w-5 mr-2 shrink-0" /> 
                     <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                   </Link>
                 ) : (
@@ -166,10 +162,10 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
                     <Link
                       href={item.href}
                       legacyBehavior={false} 
-                      className="flex items-center gap-2 flex-grow" 
-                      onClick={handleLinkClick} 
+                      className="flex items-center flex-grow" 
+                      onClick={handleMainItemClick} 
                     >
-                      <item.icon className="h-5 w-5" />
+                      <item.icon className="h-5 w-5 mr-2 shrink-0" />
                       <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                     </Link>
                     <ChevronDown
@@ -195,7 +191,7 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
                         <SidebarMenuButton
                           isActive={pathname === subItem.href}
                           className="w-full justify-start h-auto py-1.5 text-xs font-normal" 
-                          onClick={closeMobileSheet}
+                          onClick={handleLinkClickAndCloseSheet}
                           tooltip={subItem.label}
                         >
                           <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
@@ -215,10 +211,10 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
             <SidebarMenuButton
               isActive={pathname === item.href}
               className="w-full justify-start"
-              onClick={closeMobileSheet}
+              onClick={handleLinkClickAndCloseSheet}
               tooltip={item.label}
             >
-              <item.icon className="h-5 w-5" />
+              <item.icon className="h-5 w-5 mr-2 shrink-0" />
               <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
             </SidebarMenuButton>
           </Link>
@@ -231,10 +227,7 @@ const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isMobileSheetOpen, setIsMobileSheetOpen] = React.useState(false);
-  // This state is now managed by NavLinks if needed, or context
-  // const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
 
-  // Placeholder for NavLinks before client-side rendering
   const navLinksPlaceholder = (
     <>
       {[...mainCategoryNavItems, ...staticNavItems].map((item, index) => (
@@ -259,7 +252,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarHeader>
           <SidebarContent className="p-2">
             <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
-              <NavLinks />
+              <NavLinks closeMobileSheet={() => setIsMobileSheetOpen(false)} />
             </ClientSideOnlyRenderer>
           </SidebarContent>
           <SidebarFooter className="p-4 mt-auto group-data-[collapsible=icon]:hidden">
@@ -287,7 +280,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </MobileSheetHeader>
                 <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto"> 
                   <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
-                    <NavLinks isMobile />
+                    <NavLinks isMobile closeMobileSheet={() => setIsMobileSheetOpen(false)} />
                   </ClientSideOnlyRenderer>
                 </nav>
                  <div className="mt-auto p-4 border-t">
@@ -308,5 +301,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
-
-    

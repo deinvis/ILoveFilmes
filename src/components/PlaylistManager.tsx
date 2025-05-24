@@ -1,11 +1,11 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Trash2, AlertCircle, ListVideo, CalendarClock, Pencil } from 'lucide-react';
+import { PlusCircle, Trash2, AlertCircle, ListVideo, CalendarClock, Pencil, UploadCloud } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -31,8 +31,10 @@ export function PlaylistManager() {
   const [newXcDns, setNewXcDns] = useState('');
   const [newXcUsername, setNewXcUsername] = useState('');
   const [newXcPassword, setNewXcPassword] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { playlists, addPlaylist, removePlaylist, isLoading, error, fetchAndParsePlaylists, updatePlaylist } = usePlaylistStore();
+  const { playlists, addPlaylist, removePlaylist, isLoading, error, fetchAndParsePlaylists, updatePlaylist, addPlaylistFromFileContent } = usePlaylistStore();
   const { toast } = useToast();
 
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -50,20 +52,50 @@ export function PlaylistManager() {
     }
   }, [fetchAndParsePlaylists, isLoading, playlists.length]);
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files[0]) {
+      setSelectedFile(event.target.files[0]);
+      setNewPlaylistUrl(''); // Clear URL if file is selected
+    }
+  };
 
   const handleAddPlaylist = async () => {
     let playlistNameError = false;
     
     if (playlistInputType === 'm3u') {
-      if (!newPlaylistUrl.trim()) {
-        toast({ title: "Erro", description: "URL da playlist não pode ser vazia.", variant: "destructive" });
+      if (selectedFile) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const fileContent = e.target?.result as string;
+          if (fileContent) {
+            await addPlaylistFromFileContent(fileContent, newPlaylistName.trim() || selectedFile.name);
+             const currentError = usePlaylistStore.getState().error; 
+             if (currentError) {
+                toast({ title: "Erro ao adicionar playlist do arquivo", description: currentError, variant: "destructive" });
+             } else {
+                toast({ title: "Sucesso", description: `Playlist do arquivo "${newPlaylistName.trim() || selectedFile.name}" agendada para adição.` });
+                setSelectedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                setNewPlaylistName('');
+             }
+          } else {
+            toast({ title: "Erro", description: "Não foi possível ler o conteúdo do arquivo.", variant: "destructive" });
+          }
+        };
+        reader.onerror = () => {
+          toast({ title: "Erro", description: "Falha ao ler o arquivo.", variant: "destructive" });
+        };
+        reader.readAsText(selectedFile);
+        return; // Processing will happen in onload
+      } else if (!newPlaylistUrl.trim()) {
+        toast({ title: "Erro", description: "URL da playlist ou arquivo M3U deve ser fornecido.", variant: "destructive" });
         return;
       }
       try { new URL(newPlaylistUrl); } catch (_) {
         toast({ title: "Erro", description: "Formato de URL inválido.", variant: "destructive" });
         return;
       }
-      await addPlaylist({ type: 'm3u', url: newPlaylistUrl, name: newPlaylistName.trim() || undefined });
+      await addPlaylist({ type: 'm3u', url: newPlaylistUrl, name: newPlaylistName.trim() || undefined, source: 'url' });
     } else if (playlistInputType === 'xc') {
       if (!newXcDns.trim() || !newXcUsername.trim() || !newXcPassword.trim()) {
         toast({ title: "Erro", description: "DNS, Nome de Usuário e Senha são obrigatórios para Xtream Codes.", variant: "destructive" });
@@ -85,6 +117,7 @@ export function PlaylistManager() {
         xcUsername: newXcUsername,
         xcPassword: newXcPassword,
         name: newPlaylistName.trim() || newXcDns,
+        source: 'url' // XC is always URL based for initial setup
       });
     }
     
@@ -96,7 +129,7 @@ export function PlaylistManager() {
        toast({ title: "Erro ao adicionar playlist", description: currentError, variant: "destructive" });
     }
     
-    if (!playlistNameError) {
+    if (!playlistNameError && !selectedFile) { // Don't reset if file was processed, it resets itself
       toast({ title: "Sucesso", description: `Playlist ${lastAddedPlaylistName} agendada para adição.` });
       setNewPlaylistUrl('');
       setNewPlaylistName('');
@@ -120,7 +153,7 @@ export function PlaylistManager() {
     setEditingPlaylist(playlist);
     setEditPlaylistName(playlist.name || '');
     if (playlist.type === 'm3u') {
-      setEditPlaylistUrl(playlist.url || '');
+      setEditPlaylistUrl(playlist.url || ''); // File-based M3Us won't have URLs here for editing.
       setEditXcDns('');
       setEditXcUsername('');
       setEditXcPassword('');
@@ -140,15 +173,16 @@ export function PlaylistManager() {
     let validationError = false;
 
     if (editingPlaylist.type === 'm3u') {
-      if (!editPlaylistUrl.trim()) {
+      if (editingPlaylist.source !== 'file' && !editPlaylistUrl.trim()) { // Only validate URL if it's a URL-based M3U
         toast({ title: "Erro na Edição", description: "URL da playlist M3U não pode ser vazia.", variant: "destructive" });
         validationError = true;
-      } else {
+      } else if (editingPlaylist.source !== 'file') {
         try { new URL(editPlaylistUrl); updates.url = editPlaylistUrl; } catch (_) {
           toast({ title: "Erro na Edição", description: "Formato de URL M3U inválido.", variant: "destructive" });
           validationError = true;
         }
       }
+      // For file-based M3U, only name can be edited here. URL/content is not editable.
     } else if (editingPlaylist.type === 'xc') {
       if (!editXcDns.trim() || !editXcUsername.trim() || !editXcPassword.trim()) {
         toast({ title: "Erro na Edição", description: "DNS, Nome de Usuário e Senha são obrigatórios para Xtream Codes.", variant: "destructive" });
@@ -192,7 +226,7 @@ export function PlaylistManager() {
           <CardTitle className="text-2xl font-bold flex items-center">
             <ListVideo className="mr-3 h-7 w-7 text-primary" /> Gerenciar Playlists
           </CardTitle>
-          <CardDescription>Adicione ou remova suas fontes de playlist (URL M3U ou Xtream Codes).</CardDescription>
+          <CardDescription>Adicione ou remova suas fontes de playlist (URL M3U, Xtream Codes ou arquivo M3U).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {error && !isLoading && (
@@ -205,10 +239,10 @@ export function PlaylistManager() {
           <div className="space-y-4">
             <div>
               <Label className="mb-2 block text-sm font-medium">Tipo de Playlist</Label>
-              <RadioGroup value={playlistInputType} onValueChange={(value) => setPlaylistInputType(value as PlaylistType)} className="flex space-x-4">
+              <RadioGroup value={playlistInputType} onValueChange={(value) => { setPlaylistInputType(value as PlaylistType); setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="flex space-x-4">
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="m3u" id="type-m3u" />
-                  <Label htmlFor="type-m3u">URL M3U</Label>
+                  <Label htmlFor="type-m3u">M3U (URL ou Arquivo)</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="xc" id="type-xc" />
@@ -218,16 +252,34 @@ export function PlaylistManager() {
             </div>
 
             {playlistInputType === 'm3u' && (
-              <div>
-                <Label htmlFor="playlist-url" className="mb-1.5 block text-sm font-medium">URL da Playlist M3U*</Label>
-                <Input
-                  id="playlist-url"
-                  type="url"
-                  placeholder="Ex: https://example.com/playlist.m3u"
-                  value={newPlaylistUrl}
-                  onChange={(e) => setNewPlaylistUrl(e.target.value)}
-                  aria-label="Nova URL de playlist M3U"
-                />
+              <div className="space-y-3 p-4 border rounded-md bg-muted/20">
+                 <h4 className="text-md font-semibold mb-2">Detalhes M3U</h4>
+                <div>
+                    <Label htmlFor="playlist-url" className="mb-1.5 block text-sm font-medium">URL da Playlist M3U</Label>
+                    <Input
+                    id="playlist-url"
+                    type="url"
+                    placeholder="Ex: https://example.com/playlist.m3u"
+                    value={newPlaylistUrl}
+                    onChange={(e) => { setNewPlaylistUrl(e.target.value); setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                    aria-label="Nova URL de playlist M3U"
+                    disabled={!!selectedFile}
+                    />
+                </div>
+                <div className="text-center my-2 text-sm text-muted-foreground">OU</div>
+                <div>
+                    <Label htmlFor="playlist-file" className="mb-1.5 block text-sm font-medium">Carregar Arquivo M3U (.m3u, .m3u8)</Label>
+                    <Input
+                    id="playlist-file"
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".m3u,.m3u8"
+                    onChange={handleFileChange}
+                    aria-label="Carregar arquivo M3U"
+                    className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                    />
+                    {selectedFile && <p className="text-xs text-muted-foreground mt-1">Arquivo selecionado: {selectedFile.name}</p>}
+                </div>
               </div>
             )}
 
@@ -275,7 +327,7 @@ export function PlaylistManager() {
               <Input
                 id="playlist-name"
                 type="text"
-                placeholder={playlistInputType === 'xc' ? (newXcDns || 'Minha Lista XC') : 'Minha Lista M3U'}
+                placeholder={playlistInputType === 'xc' ? (newXcDns || 'Minha Lista XC') : (selectedFile ? selectedFile.name : (newPlaylistUrl || 'Minha Lista M3U'))}
                 value={newPlaylistName}
                 onChange={(e) => setNewPlaylistName(e.target.value)}
                 aria-label="Nome opcional para a playlist"
@@ -301,11 +353,11 @@ export function PlaylistManager() {
                     className="flex items-center justify-between p-3 bg-card hover:bg-muted/50 rounded-md transition-colors"
                   >
                     <div className="truncate flex-grow mr-2">
-                      <p className="font-medium truncate text-sm" title={playlist.name || (playlist.type === 'm3u' ? playlist.url : playlist.xcDns)}>
-                        {playlist.name || (playlist.type === 'm3u' ? 'Playlist M3U Sem Nome' : 'Playlist XC Sem Nome')}
+                      <p className="font-medium truncate text-sm" title={playlist.name || (playlist.type === 'm3u' ? (playlist.url || 'Arquivo M3U') : playlist.xcDns)}>
+                        {playlist.name || (playlist.type === 'm3u' ? (playlist.url ? 'Playlist M3U Sem Nome' : `Arquivo: ${playlist.url || 'Desconhecido'}`) : 'Playlist XC Sem Nome')}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate" title={playlist.type === 'm3u' ? playlist.url : playlist.xcDns}>
-                        {playlist.type === 'm3u' ? playlist.url : `XC: ${playlist.xcDns}`}
+                      <p className="text-xs text-muted-foreground truncate" title={playlist.type === 'm3u' ? (playlist.url || `Fonte: ${playlist.source}`) : playlist.xcDns}>
+                        {playlist.type === 'm3u' ? (playlist.url || `Fonte: ${playlist.source}`) : `XC: ${playlist.xcDns}`}
                       </p>
                       {playlist.expiryDate && (
                         <p className="text-xs text-muted-foreground/80 truncate mt-0.5 flex items-center" title={`Expira em: ${formatExpiryDate(playlist.expiryDate)}`}>
@@ -318,18 +370,18 @@ export function PlaylistManager() {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleEditClick(playlist)}
-                        disabled={isLoading}
-                        aria-label={`Editar playlist ${playlist.name || (playlist.type === 'm3u' ? playlist.url : playlist.xcDns)}`}
+                        disabled={isLoading || playlist.source === 'file'} // Disable edit for file-based for now
+                        title={playlist.source === 'file' ? "Edição de nome para arquivos via 'Nome da Playlist' ao adicionar" : `Editar playlist ${playlist.name || '...'}`}
                         className="mr-1"
                       >
-                        <Pencil className="h-4 w-4 text-blue-500 hover:text-blue-400" />
+                        <Pencil className={cn("h-4 w-4 text-blue-500 hover:text-blue-400", playlist.source === 'file' && "opacity-50 cursor-not-allowed")} />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => handleRemovePlaylist(playlist.id)}
                         disabled={isLoading}
-                        aria-label={`Remover playlist ${playlist.name || (playlist.type === 'm3u' ? playlist.url : playlist.xcDns)}`}
+                        aria-label={`Remover playlist ${playlist.name || (playlist.type === 'm3u' ? (playlist.url || 'Arquivo M3U') : playlist.xcDns)}`}
                       >
                         <Trash2 className="h-4 w-4 text-destructive hover:text-red-400" />
                       </Button>
@@ -342,7 +394,7 @@ export function PlaylistManager() {
         </CardContent>
         <CardFooter>
           <p className="text-xs text-muted-foreground">
-            Playlists são armazenadas localmente. Conteúdo de mídia é buscado sob demanda. Para Xtream Codes, a senha é armazenada.
+            Playlists são armazenadas localmente. Para Xtream Codes, a senha é armazenada. Conteúdo de arquivos M3U é processado no momento do upload.
           </p>
         </CardFooter>
       </Card>
@@ -353,7 +405,7 @@ export function PlaylistManager() {
             <DialogHeader>
               <DialogTitle>Editar Playlist: {editingPlaylist.name || (editingPlaylist.type === 'm3u' ? editingPlaylist.url : editingPlaylist.xcDns)}</DialogTitle>
               <DialogDescription>
-                Modifique os detalhes da sua playlist {editingPlaylist.type === 'm3u' ? 'M3U' : 'Xtream Codes'}. O tipo da playlist não pode ser alterado.
+                Modifique os detalhes da sua playlist {editingPlaylist.type === 'm3u' ? 'M3U' : 'Xtream Codes'}. O tipo da playlist e a fonte (URL/Arquivo) não podem ser alterados.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -367,7 +419,7 @@ export function PlaylistManager() {
                 />
               </div>
 
-              {editingPlaylist.type === 'm3u' && (
+              {editingPlaylist.type === 'm3u' && editingPlaylist.source === 'url' && (
                 <div>
                   <Label htmlFor="edit-playlist-url">URL da Playlist M3U*</Label>
                   <Input
@@ -379,6 +431,12 @@ export function PlaylistManager() {
                   />
                 </div>
               )}
+               {editingPlaylist.type === 'm3u' && editingPlaylist.source === 'file' && (
+                <p className="text-sm text-muted-foreground">
+                    Para alterar o conteúdo de uma playlist baseada em arquivo, por favor, remova-a e adicione o novo arquivo.
+                </p>
+              )}
+
 
               {editingPlaylist.type === 'xc' && (
                 <div className="space-y-3">
@@ -419,7 +477,7 @@ export function PlaylistManager() {
               <DialogClose asChild>
                 <Button variant="outline">Cancelar</Button>
               </DialogClose>
-              <Button onClick={handleSaveChanges} disabled={isLoading}>
+              <Button onClick={handleSaveChanges} disabled={isLoading || (editingPlaylist.type === 'm3u' && editingPlaylist.source === 'file' && !editPlaylistName.trim())}>
                 {isLoading ? 'Salvando...' : 'Salvar Alterações'}
               </Button>
             </DialogFooter>
@@ -429,5 +487,3 @@ export function PlaylistManager() {
     </>
   );
 }
-
-    

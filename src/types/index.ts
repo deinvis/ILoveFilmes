@@ -9,8 +9,9 @@ export interface PlaylistItem {
   type: PlaylistType;
   name?: string; 
   addedAt: string;
-  
-  // For M3U type
+  source?: 'url' | 'file'; // To distinguish between URL-based and file-based M3U lists
+
+  // For M3U type (if source is 'url')
   url?: string; 
   
   // For XC type
@@ -20,7 +21,6 @@ export interface PlaylistItem {
   
   // Optional fields, mainly for XC type
   expiryDate?: string; // Store as ISO string
-  // Consider adding other XC info if needed: status, max_connections etc.
 }
 
 export interface MediaItem {
@@ -31,7 +31,7 @@ export interface MediaItem {
   streamUrl: string;
   description?: string;
   genre?: string;
-  groupTitle?: string;
+  groupTitle?: string; // This is the group-title from M3U, or genre for VOD if tvg-genre is absent
   tvgId?: string;
   originatingPlaylistId: string; 
   originatingPlaylistName?: string; 
