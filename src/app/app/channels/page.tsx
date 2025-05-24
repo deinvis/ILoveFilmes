@@ -22,24 +22,13 @@ type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
 // Helper adapted from MediaCard to count logical sources for filtering
 const hasMultipleLogicalSources = (currentItem: MediaItem, allItems: MediaItem[], parentalControlEnabled: boolean): boolean => {
-  if (!currentItem) return false;
-  // When counting sources, consider only items that would be visible based on parental controls
+  if (!currentItem || currentItem.type !== 'channel') return false; // Only for channels for this page's filter
   const visibleItems = applyParentalFilter(allItems, parentalControlEnabled);
 
-  let potentialSources: MediaItem[];
-  if (currentItem.tvgId) {
-    potentialSources = visibleItems.filter(
-      (item) => item.tvgId === currentItem.tvgId && item.type === currentItem.type
-    );
-  } else {
-    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title, currentItem.type);
-    potentialSources = visibleItems.filter(
-      (item) => {
-        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title, item.type);
-        return otherItemTitleNormalizedKey === currentItemTitleNormalizedKey && item.type === currentItem.type;
-      }
-    );
-  }
+  // For channels, group by baseName to find variants (different qualities/sources of the same channel)
+  const potentialSources = visibleItems.filter(
+    (item) => item.type === 'channel' && item.baseName === currentItem.baseName
+  );
   return potentialSources.length > 1;
 };
 
@@ -83,9 +72,8 @@ export default function ChannelsPage() {
     let interval: NodeJS.Timeout | undefined;
     const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => item.type === 'channel').length > 0);
 
-
-    if (combinedLoading) { // Show progress if any loading is happening
-        setProgressValue(prev => (prev === 100 ? 10 : prev)); 
+    if (combinedLoading) {
+        setProgressValue(prev => (prev === 100 ? 10 : prev));
         interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
         }, 500);
@@ -110,51 +98,99 @@ export default function ChannelsPage() {
     };
   }, [searchTerm]);
 
-  const allChannels = useMemo(() => {
+  const allChannelsRaw = useMemo(() => {
     let channels = mediaItems.filter(item => item.type === 'channel');
     channels = applyParentalFilter(channels, parentalControlEnabled);
+    return channels;
+  }, [mediaItems, parentalControlEnabled]);
+
+  const allLogicalChannels = useMemo(() => {
+    let channelsToProcess = [...allChannelsRaw];
 
     if (showOnlyMultiSource) {
-      channels = channels.filter(channel => hasMultipleLogicalSources(channel, mediaItems, parentalControlEnabled));
+      // Filter logical channels: keep only those where the representative item (first variant) has multiple sources.
+      const logicalSourceMap = new Map<string, MediaItem[]>();
+      channelsToProcess.forEach(channel => {
+        const key = channel.baseName || channel.title;
+        if (!logicalSourceMap.has(key)) logicalSourceMap.set(key, []);
+        logicalSourceMap.get(key)!.push(channel);
+      });
+      
+      channelsToProcess = Array.from(logicalSourceMap.values())
+        .filter(variants => variants.length > 1)
+        .flatMap(variants => variants); // Flatten back, or decide on representative
     }
+    
+    // Create a map of baseName to its variants
+    const logicalChannelMap = new Map<string, MediaItem[]>();
+    channelsToProcess.forEach(channel => {
+      const key = channel.baseName || channel.title; // Use baseName as the key for logical channels
+      if (!logicalChannelMap.has(key)) {
+        logicalChannelMap.set(key, []);
+      }
+      logicalChannelMap.get(key)!.push(channel);
+    });
+
+    // Sort variants within each logical channel (e.g., by quality or playlist name) - optional
+    logicalChannelMap.forEach(variants => {
+      variants.sort((a, b) => (a.qualityTag || '').localeCompare(b.qualityTag || '') || (a.originatingPlaylistName || '').localeCompare(b.originatingPlaylistName || ''));
+    });
+    
+    let representativeChannels = Array.from(logicalChannelMap.values()).map(variants => variants[0]); // Get the first variant as representative
 
     switch (sortOrder) {
       case 'title-asc':
-        channels = [...channels].sort((a, b) => a.title.localeCompare(b.title));
+        representativeChannels = representativeChannels.sort((a, b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
         break;
       case 'title-desc':
-        channels = [...channels].sort((a, b) => b.title.localeCompare(a.title));
+        representativeChannels = representativeChannels.sort((a, b) => (b.baseName || b.title).localeCompare(a.baseName || a.title));
         break;
     }
-    return channels;
-  }, [mediaItems, sortOrder, parentalControlEnabled, showOnlyMultiSource]);
+    return representativeChannels;
+  }, [allChannelsRaw, sortOrder, showOnlyMultiSource]);
 
-  const filteredChannels = useMemo(() => {
+
+  const filteredLogicalChannels = useMemo(() => {
     if (!debouncedSearchTerm) {
-      return allChannels;
+      return allLogicalChannels;
     }
-    return allChannels.filter(channel =>
-      channel.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+    return allLogicalChannels.filter(channel =>
+      (channel.baseName || channel.title).toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
       (channel.groupTitle && channel.groupTitle.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
     );
-  }, [allChannels, debouncedSearchTerm]);
+  }, [allLogicalChannels, debouncedSearchTerm]);
 
   const groupedChannelsArray = useMemo(() => {
     const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
-    filteredChannels.forEach(channel => {
-      const rawGroupName = channel.groupTitle || 'Uncategorized';
+    
+    filteredLogicalChannels.forEach(representativeChannel => {
+      // Find all variants for this representative channel from the *original unfiltered list*
+      const allVariantsForThisLogicalChannel = allChannelsRaw.filter(
+        c => c.baseName === representativeChannel.baseName
+      );
+
+      const rawGroupName = representativeChannel.groupTitle || 'Uncategorized';
       const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName, 'channel');
 
       if (!groupsMap[normalizedKey]) {
         groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
       }
-      groupsMap[normalizedKey].items.push(channel);
+      // Add the representative channel to the items list of the group
+      // We will pass all variants to the MediaCard later
+      if (!groupsMap[normalizedKey].items.some(item => item.baseName === representativeChannel.baseName)) {
+         groupsMap[normalizedKey].items.push(representativeChannel); // Add representative item
+      }
+    });
+    
+    // Sort items within each group by baseName for consistent display
+    Object.values(groupsMap).forEach(group => {
+        group.items.sort((a,b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
     });
 
     return Object.entries(groupsMap)
-      .map(([key, value]) => ({ ...value, normalizedKey: key })) 
+      .map(([key, value]) => ({ ...value, normalizedKey: key }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [filteredChannels]);
+  }, [filteredLogicalChannels, allChannelsRaw]);
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (!tvgId || !epgData[tvgId] || epgLoading) return null;
@@ -163,13 +199,13 @@ export default function ChannelsPage() {
   };
 
 
-  if (!isClient || (storeIsLoading && allChannels.length === 0 && playlists.length > 0 && !debouncedSearchTerm)) {
+  if (!isClient || (storeIsLoading && filteredLogicalChannels.length === 0 && playlists.length > 0 && !debouncedSearchTerm)) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Canais</h1>
         </div>
-        <Progress value={progressValue} className="w-full mb-8 h-2" />
+        {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -213,7 +249,7 @@ export default function ChannelsPage() {
     );
   }
 
-  if (mediaItems.length > 0 && allChannels.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
+  if (mediaItems.length > 0 && allLogicalChannels.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <Tv2 className="w-24 h-24 text-muted-foreground mb-6" />
@@ -236,7 +272,7 @@ export default function ChannelsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Canais</h1>
-        {(playlists.length > 0 || allChannels.length > 0) && (
+        {(playlists.length > 0 || allLogicalChannels.length > 0) && (
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <div className="relative flex-grow sm:w-64 md:w-80">
               <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
@@ -272,13 +308,13 @@ export default function ChannelsPage() {
                 checked={showOnlyMultiSource}
                 onCheckedChange={setShowOnlyMultiSource}
             />
-            <Label htmlFor="multi-source-filter-channels">Mostrar apenas canais com múltiplas fontes</Label>
+            <Label htmlFor="multi-source-filter-channels">Mostrar apenas canais com múltiplas qualidades/fontes</Label>
         </div>
       )}
 
-      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannels.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
 
-      {filteredChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
+      {filteredLogicalChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
           <p className="text-xl text-muted-foreground">Nenhum canal encontrado para "{debouncedSearchTerm}".</p>
@@ -290,8 +326,9 @@ export default function ChannelsPage() {
         <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold hover:underline">
+              {/* TODO: Link para página de grupo aqui precisa ser ajustado para lógica de canais lógicos */}
               <Link href={`/app/group/channel/${encodeURIComponent(group.displayName)}`}>
-                {group.displayName} ({group.items.length})
+                {group.displayName} ({group.items.length}) {/* This count is now for logical channels */}
               </Link>
             </h2>
             {group.items.length > ITEMS_PER_GROUP_PREVIEW && (
@@ -301,12 +338,17 @@ export default function ChannelsPage() {
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => {
-              const nowPlayingProgram = getNowPlaying(item.tvgId);
+            {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(representativeItem => {
+              // Find all variants for this representative item from the original raw list
+              const allVariants = allChannelsRaw.filter(
+                c => c.baseName === representativeItem.baseName
+              );
+              const nowPlayingProgram = getNowPlaying(representativeItem.tvgId); // EPG for representative or first variant
               return (
                 <MediaCard
-                  key={item.id}
-                  item={item}
+                  key={`${representativeItem.baseName}-${representativeItem.id}`}
+                  item={representativeItem} // Pass the representative item
+                  allChannelVariants={allVariants} // Pass all its variants
                   nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}
                 />
               );
@@ -314,7 +356,7 @@ export default function ChannelsPage() {
           </div>
         </section>
       ))}
-       {allChannels.length === 0 && !debouncedSearchTerm && !storeIsLoading && mediaItems.length > 0 && (
+       {allLogicalChannels.length === 0 && !debouncedSearchTerm && !storeIsLoading && mediaItems.length > 0 && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <ListFilter className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
            <p className="text-xl text-muted-foreground">Nenhum canal para exibir com os filtros atuais.</p>
