@@ -17,8 +17,8 @@ const QUALITY_TAGS_PATTERNS: { tag: string }[] = [
   { tag: 'SD H265' }, { tag: 'SD HEVC' },
 
   // Resolution/Quality indicators (longer ones first if they are subsets of others)
-  { tag: '4K UHD' },   // Combined resolution + quality indicator
-  { tag: 'UHD 4K' },   // Combined resolution + quality indicator
+  { tag: '4K UHD' },
+  { tag: 'UHD 4K' },
   { tag: 'FHD' },
   { tag: 'UHD' },
   { tag: '4K' },
@@ -34,58 +34,48 @@ const QUALITY_TAGS_PATTERNS: { tag: string }[] = [
 
 // Separators that might be before the quality tag. Ensure regex special chars are escaped.
 const SEPARATORS_CHARS = ['|', '-', '–', '—', '(', ')', '[', ']'];
-// This part is not currently used in the simplified logic but kept for reference if needed.
-// const SPECIAL_SEPARATOR_REGEX_PART = `[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]`;
+const SEPARATORS_REGEX_PART = SEPARATORS_CHARS.map(s => `\\${s}`).join('');
 
 export function extractChannelInfo(title: string): ExtractedChannelInfo {
   if (!title) return { baseName: 'Canal Desconhecido', qualityTag: undefined };
   const originalTrimmedTitle = title.trim();
 
   for (const pattern of QUALITY_TAGS_PATTERNS) {
-    const tag = pattern.tag; // e.g., "FHD H265", "HD", "SD"
+    const tag = pattern.tag;
     // Escape the tag for regex and allow flexible spacing within multi-word tags
     const tagRegexPart = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-    // Suffix for variants like numbers, ², ³
-    const variantSuffixPattern = `(?:[\\s\\d²³]*)`;
+    // Suffix for variants like numbers, ², ³ (optional)
+    const variantSuffixPattern = `(?:[\\s\\d²³]*)`; // Allows space, digit, ², ³ zero or more times
     const fullQualityPatternString = `${tagRegexPart}${variantSuffixPattern}`;
 
-    // Regex breakdown:
-    // ^(.*?)                        : Group 1 (potentialBaseName) - anything, non-greedy
-    // (                             : Group 2 (separatorBlock) - one of the following:
-    //    \\s+                       :   At least one space
-    //    |                          :   OR
-    //    \\s*[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]\\s*  : A separator char, surrounded by optional spaces
-    // )
-    // (${fullQualityPatternString}) : Group 3 (matchedQuality) - the full quality pattern
-    // $                             : End of the string
-    const qualityRegexString = `^(.*?)(?:\\s+|\\s*[${SEPARATORS_CHARS.map(s => `\\${s}`).join('')}]\\s*)(${fullQualityPatternString})$`;
-    const qualityRegex = new RegExp(qualityRegexString, 'i');
-    const match = originalTrimmedTitle.match(qualityRegex);
+    // Regex to match:
+    // 1. (Base Name)(Separator)(Full Quality Pattern at end of string)
+    // OR
+    // 2. (Full Quality Pattern at end of string) if it's the whole string
+    // The separator part `(?:\\s*(?:[${SEPARATORS_REGEX_PART}]|\\s)\\s+)` requires at least one space or special separator
+    const regexString = `^(.*?)(?:\\s*(?:[${SEPARATORS_REGEX_PART}]|\\s)\\s+)(${fullQualityPatternString})$|^(${fullQualityPatternString})$`;
+    // Group 1: potentialBaseName (if separator matched)
+    // Group 2: matchedQualityWithSeparator (if separator matched)
+    // Group 3: matchedQualityOnly (if no separator, whole string is quality)
+    const regex = new RegExp(regexString, 'i');
+    const match = originalTrimmedTitle.match(regex);
 
     if (match) {
-      const potentialBaseName = match[1].trim();
-      const matchedQuality = match[2].trim(); // Group 2 is now the quality pattern string
-
-      if (potentialBaseName) {
-        // Ensure we are not stripping something that looks like a quality tag
-        // but is actually part of a multi-word base name if the tag is very short (e.g. "SD")
-        // This check is a bit heuristic.
-        if (tag.length <= 2 && potentialBaseName.toUpperCase().endsWith(tag.toUpperCase())) {
-             // Avoid cases like "NEWS SD CHANNEL" being split into "NEWS" and "SD CHANNEL" if "SD" is a tag.
-             // If "SD CHANNEL" is a quality tag, it should be in QUALITY_TAGS_PATTERNS.
-        } else {
-            return { baseName: potentialBaseName, qualityTag: matchedQuality };
+      if (match[1] !== undefined && match[2] !== undefined) {
+        // Matched: BaseName Separator QualityPattern
+        const potentialBaseName = match[1].trim();
+        const matchedQuality = match[2].trim();
+        if (potentialBaseName) { // Ensure baseName is not empty after trim
+          return { baseName: potentialBaseName, qualityTag: matchedQuality };
         }
+      } else if (match[3] !== undefined) {
+        // Matched: QualityPattern (the whole string)
+        const matchedQuality = match[3].trim();
+        return { baseName: matchedQuality, qualityTag: matchedQuality };
       }
-    }
-
-    // Fallback: if the entire title is just the quality tag (e.g., channel named "HD")
-    const qualityOnlyRegex = new RegExp(`^(${fullQualityPatternString})$`, 'i');
-    if (originalTrimmedTitle.match(qualityOnlyRegex)) {
-      return { baseName: originalTrimmedTitle, qualityTag: originalTrimmedTitle };
     }
   }
 
-  // If no quality tag found, the whole title is the baseName
+  // If no quality tag found after checking all patterns, the whole title is the baseName
   return { baseName: originalTrimmedTitle, qualityTag: undefined };
 }
