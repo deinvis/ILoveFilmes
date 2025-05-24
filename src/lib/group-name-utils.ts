@@ -12,34 +12,48 @@ interface ProcessedGroupName {
 const DEFAULT_GROUP_NAME_UPPERCASE = 'UNCATEGORIZED';
 
 // These are broad categories that should not be prefixed with "CANAIS" even if mediaType is channel
-const BROAD_CANONICAL_CATEGORIES = ["LANÇAMENTOS", "FICÇÃO E FANTASIA"];
+const BROAD_CANONICAL_CATEGORIES = ["LANÇAMENTOS", "FICÇÃO E FANTASIA"]; // These are already in uppercase
 
-// Map of normalized core group name variations to their canonical *display* core name
+// Map of normalized core group name variations to their canonical *display* core name (uppercase)
 // The values here are the desired form of the *core* part before "CANAIS " is prepended or toUpperCase is applied.
 const CANONICAL_CORE_DISPLAY_MAP: Record<string, string> = {
-  "lancamento": "Lançamentos",
-  "estreia": "Lançamentos",
-  "cinema": "Lançamentos",
-  "ficcao e fantasia": "Ficção e Fantasia",
-  "ficcao/fantasia": "Ficção e Fantasia",
+  // Normalization for "Lançamentos"
+  "lancamento": "LANÇAMENTOS",
+  "estreia": "LANÇAMENTOS",
+  "cinema": "LANÇAMENTOS",
+  // Normalization for "Ficção e Fantasia"
+  "ficcao e fantasia": "FICÇÃO E FANTASIA",
+  "ficcao/fantasia": "FICÇÃO E FANTASIA",
+  // Normalization for "Globo"
   "globo": "GLOBO",
   "globos": "GLOBO",
-  "infantil": "INFANTIS", // Display plural
+  // Normalization for "Infantis"
+  "infantil": "INFANTIS",
   "infantis": "INFANTIS",
+  // Normalization for "Premiere"
   "premiere": "PREMIERE",
   "rede premiere": "PREMIERE",
+  // Normalization for "Record"
   "record": "RECORD",
   "rede record": "RECORD",
+  // Normalization for "Disney PPV"
   "disney plus": "DISNEY PPV",
   "disney +": "DISNEY PPV",
   "disneyppv": "DISNEY PPV",
-  "disney ppv serie b": "DISNEY PPV", // Specific case
+  "disney ppv serie b": "DISNEY PPV",
+  // Normalization for "HBO MAX"
   "hbo": "HBO MAX",
   "hbo max": "HBO MAX",
   "rede hbo": "HBO MAX",
+  // Normalization for "24 Horas"
   "24 horas": "24 HORAS", // Display with space
-  "24horas": "24 HORAS", // Display with space
+  "24horas": "24 HORAS",  // Input without space, display with space
+  // Normalization for "UHD 4K"
   "uhd": "UHD 4K",
+  "uhd 4k": "UHD 4K", // ensure it maps to itself if already correct
+  // Normalization for "Telecine"
+  "telecine": "TELECINE",
+  "rede telecine": "TELECINE",
   // Add other specific mappings here. Key is normalized (lowercase, no diacritics).
 };
 
@@ -48,11 +62,10 @@ const GENERIC_PREFIX_PATTERNS: RegExp[] = [
   /^(?:TODOS\s*OS\s*G[ÊE]NEROS|ALL\s*GENRES|CATEGORIAS?|LISTA|GRUPO|CATEGORIA)\s*[|:\-–—\s]*/i,
 ];
 
-// Prefixes specific to media types, typically including the type name itself
 const CHANNEL_SPECIFIC_PREFIX_PATTERNS: RegExp[] = [
-  /^(?:CANAIS|CANAL)\s*[|I:\-–—]\s*/i, // "CANAIS | ", "CANAL I ", etc.
-  /^(?:CANAIS|CANAL)\s+-\s*/i,      // "CANAIS - ", "CANAL - "
-  /^(?:CANAIS|CANAL)\s+/i,          // "CANAIS ", "CANAL " (space after)
+  /^(?:CANAIS|CANAL)\s*[|I:\-–—]\s*/i,
+  /^(?:CANAIS|CANAL)\s+-\s*/i,
+  /^(?:CANAIS|CANAL)\s+/i,
 ];
 const MOVIE_PREFIX_STRIP_PATTERNS: RegExp[] = [
   /^(?:FILMES?|MOVIES?|VOD\s*FILMES?|COLE[ÇC][ÃA]O\s*DE\s*FILMES?)\s*[|:\-–—\s]*/i,
@@ -77,7 +90,7 @@ export function processGroupName(rawGroupNameInput?: string, mediaType?: MediaTy
     nameToProcess = nameToProcess.replace(pattern, '').trim();
   }
 
-  // 2. Extract Core Group Name (removing type-specific prefixes and standalone pipes if not channels)
+  // 2. Extract Core Group Name (removing type-specific prefixes and standalone pipes)
   let coreGroupName = nameToProcess;
   const specificPrefixPatterns =
     mediaType === 'channel' ? CHANNEL_SPECIFIC_PREFIX_PATTERNS :
@@ -88,60 +101,47 @@ export function processGroupName(rawGroupNameInput?: string, mediaType?: MediaTy
   for (const pattern of specificPrefixPatterns) {
     if (pattern.test(coreGroupName)) {
       coreGroupName = coreGroupName.replace(pattern, '').trim();
-      break;
+      break; 
     }
   }
-  // For channels, replace pipe with space. For others, remove entirely (already handled by prefix strip)
+  // For channels, also replace any remaining pipes with space. For others, this is less common.
   if (mediaType === 'channel') {
     coreGroupName = coreGroupName.replace(/\s*\|\s*/g, ' ').trim();
   }
-
+  coreGroupName = coreGroupName.replace(/^[-–—:]\s*/, '').trim(); // Remove leading separators if any left
 
   // 3. Normalize Core Group Name for Matching
   let normalizedCoreForMatching = removeDiacritics(coreGroupName.toLowerCase()).trim();
-   // Specific string replacements on the normalizedCoreForMatching for better matching
-  if (normalizedCoreForMatching.includes("disney ppv serie b")) { // more specific first
+   // Specific string replacements on the normalizedCoreForMatching for better map key matching
+  if (normalizedCoreForMatching.includes("disney ppv serie b")) {
     normalizedCoreForMatching = "disney ppv serie b";
   } else if (normalizedCoreForMatching.includes("disneyppv")) {
     normalizedCoreForMatching = "disneyppv";
   } else if (normalizedCoreForMatching.includes("disney plus") || normalizedCoreForMatching.includes("disney +")) {
-    normalizedCoreForMatching = "disney plus"; // Normalize to one form for map key
+    normalizedCoreForMatching = "disney plus";
   }
   if (normalizedCoreForMatching.includes("24 horas")) {
-    normalizedCoreForMatching = "24 horas"; // Keep space for map key
+    normalizedCoreForMatching = "24 horas"; 
   } else if (normalizedCoreForMatching.includes("24horas")) {
-    normalizedCoreForMatching = "24horas"; // Keep no space for map key
+    normalizedCoreForMatching = "24horas"; 
   }
 
-
-  // 4. Map to Canonical Core Display Name
-  let canonicalDisplayCore = coreGroupName; // Default to the cleaned coreGroupName
-
-  if (CANONICAL_CORE_DISPLAY_MAP[normalizedCoreForMatching]) {
-    canonicalDisplayCore = CANONICAL_CORE_DISPLAY_MAP[normalizedCoreForMatching];
-  }
-  // Fallback for keywords if direct map match fails (e.g., "Lançamentos de Cinema" -> "Lançamentos")
-  else if (["lancamento", "estreia", "cinema"].some(kw => normalizedCoreForMatching.includes(kw))) {
-    canonicalDisplayCore = CANONICAL_CORE_DISPLAY_MAP["lancamento"];
-  }
-  else if (["ficcao e fantasia", "ficcao/fantasia"].some(kw => normalizedCoreForMatching.includes(kw))) {
-    canonicalDisplayCore = CANONICAL_CORE_DISPLAY_MAP["ficcao e fantasia"];
-  }
-
+  // 4. Map to Canonical Core Display Name (which is already uppercase in the map)
+  let canonicalDisplayCore = CANONICAL_CORE_DISPLAY_MAP[normalizedCoreForMatching] || coreGroupName.toUpperCase();
 
   // 5. Construct finalDisplayName
   let finalDisplayName = canonicalDisplayCore;
 
   if (mediaType === 'channel') {
-    const isBroadCategory = BROAD_CANONICAL_CATEGORIES.includes(canonicalDisplayCore.toUpperCase());
+    const isBroad = BROAD_CANONICAL_CATEGORIES.includes(canonicalDisplayCore.toUpperCase());
     const coreAlreadyHasChannels = /^(CANAIS|CANAL)\b/i.test(removeDiacritics(canonicalDisplayCore));
 
-    if (!isBroadCategory && canonicalDisplayCore.trim() !== '' && !coreAlreadyHasChannels) {
+    if (!isBroad && canonicalDisplayCore.trim() !== '' && !coreAlreadyHasChannels) {
       finalDisplayName = "CANAIS " + canonicalDisplayCore;
-    } else if (canonicalDisplayCore.trim() === '' || (coreAlreadyHasChannels && canonicalDisplayCore.trim().length <= "CANAIS".length +1 )) { // handles "CANAIS" or "CANAL" alone
+    } else if (canonicalDisplayCore.trim() === '' || (coreAlreadyHasChannels && canonicalDisplayCore.toUpperCase().replace(/\s+/g, '') === "CANAIS")) { 
       finalDisplayName = "CANAIS";
     } else {
-      finalDisplayName = canonicalDisplayCore; // It's broad, or already has "CANAIS", or is just "CANAIS"
+      finalDisplayName = canonicalDisplayCore; // It's broad, or already correctly prefixed, or is just the core
     }
   }
 
@@ -149,11 +149,14 @@ export function processGroupName(rawGroupNameInput?: string, mediaType?: MediaTy
     finalDisplayName = DEFAULT_GROUP_NAME_UPPERCASE;
   }
 
-  // 6. Convert to Uppercase and trim
+  // 6. Ensure final display name is entirely uppercase and trimmed
   finalDisplayName = finalDisplayName.toUpperCase().trim();
-  // Ensure "24 HORAS" has a space if it became "24HORAS" due to earlier processing
-  if (finalDisplayName.endsWith("24HORAS") && !finalDisplayName.endsWith(" 24HORAS")) {
-      finalDisplayName = finalDisplayName.replace("24HORAS", "24 HORAS");
+  // Final specific formatting tweaks
+  if (finalDisplayName === "CANAIS 24HORAS") { // If it became this due to map key
+      finalDisplayName = "CANAIS 24 HORAS";
+  }
+  if (finalDisplayName === "CANAIS UHD") { // If it became this
+      finalDisplayName = "CANAIS UHD 4K";
   }
 
 
