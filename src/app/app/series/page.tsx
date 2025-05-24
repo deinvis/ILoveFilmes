@@ -14,22 +14,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { applyParentalFilter } from '@/lib/parental-filter';
 import type { MediaItem } from '@/types';
+import { processGroupName } from '@/lib/group-name-utils';
 
 const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
-
-const normalizeGroupName = (name?: string): string => {
-  if (!name) return 'uncategorized';
-  return name.trim().toLowerCase();
-};
 
 export default function SeriesPage() {
   const [isClient, setIsClient] = useState(false);
   const {
     playlists,
     mediaItems,
-    isLoading,
-    error,
+    isLoading: storeIsLoading,
+    error: storeError,
     fetchAndParsePlaylists,
     parentalControlEnabled
   } = usePlaylistStore();
@@ -50,25 +46,21 @@ export default function SeriesPage() {
 
   useEffect(() => {
     if(!isClient) return;
-
     let interval: NodeJS.Timeout | undefined;
-    if (isLoading && mediaItems.length === 0) {
-      setProgressValue(10);
-      interval = setInterval(() => {
+
+    if (isClient && storeIsLoading) {
+        setProgressValue(prev => (prev === 100 ? 10 : prev));
+        interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
-      }, 500);
+        }, 500);
     } else {
-      if (interval) {
-        clearInterval(interval);
-      }
-      setProgressValue(100);
+        if (interval) clearInterval(interval);
+        setProgressValue(100);
     }
     return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
+        if (interval) clearInterval(interval);
     };
-  }, [isLoading, isClient, mediaItems]);
+  }, [isClient, storeIsLoading]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -109,9 +101,10 @@ export default function SeriesPage() {
     const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
     filteredSeries.forEach(s => {
       const rawGroupName = s.groupTitle || s.genre || 'Uncategorized';
-      const normalizedKey = normalizeGroupName(rawGroupName);
+      const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName);
+      
       if (!groupsMap[normalizedKey]) {
-        groupsMap[normalizedKey] = { displayName: rawGroupName, items: [] };
+        groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
       }
       groupsMap[normalizedKey].items.push(s);
     });
@@ -122,13 +115,13 @@ export default function SeriesPage() {
   }, [filteredSeries]);
 
 
-  if (!isClient || (isLoading && allSeries.length === 0)) {
+  if (!isClient || (storeIsLoading && allSeries.length === 0)) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Clapperboard className="mr-3 h-8 w-8 text-primary" /> Series</h1>
         </div>
-        {isClient && isLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
              <div key={index} className="flex flex-col space-y-3">
@@ -144,12 +137,12 @@ export default function SeriesPage() {
     );
   }
 
-  if (error) {
+  if (storeError) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <AlertTriangle className="w-20 h-20 text-destructive mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Error Loading Series</h2>
-        <p className="text-muted-foreground text-lg mb-8 max-w-md">{error}</p>
+        <p className="text-muted-foreground text-lg mb-8 max-w-md">{storeError}</p>
         <Button onClick={() => fetchAndParsePlaylists(true)} size="lg">
           Try Again
         </Button>
@@ -157,7 +150,7 @@ export default function SeriesPage() {
     );
   }
 
-  if (playlists.length === 0 && !isLoading) {
+  if (playlists.length === 0 && !storeIsLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <Clapperboard className="w-24 h-24 text-primary mb-6" />
@@ -172,7 +165,7 @@ export default function SeriesPage() {
     );
   }
 
-  if (mediaItems.length > 0 && allSeries.length === 0 && !isLoading) {
+  if (mediaItems.length > 0 && allSeries.length === 0 && !storeIsLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <Clapperboard className="w-24 h-24 text-muted-foreground mb-6" />
@@ -191,7 +184,7 @@ export default function SeriesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center"><Clapperboard className="mr-3 h-8 w-8 text-primary" /> Series</h1>
-        {!isLoading && allSeries.length > 0 && (
+        {!storeIsLoading && allSeries.length > 0 && (
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <div className="relative flex-grow sm:w-64 md:w-80">
               <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
@@ -220,9 +213,9 @@ export default function SeriesPage() {
         )}
       </div>
 
-      {isClient && isLoading && allSeries.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-4 h-2" />}
 
-      {filteredSeries.length === 0 && debouncedSearchTerm && !isLoading && (
+      {filteredSeries.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
           <p className="text-xl text-muted-foreground">No series found matching your search for "{debouncedSearchTerm}".</p>
@@ -233,7 +226,7 @@ export default function SeriesPage() {
       {groupedSeriesArray.map(group => (
         <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-semibold capitalize hover:underline">
+            <h2 className="text-2xl font-semibold hover:underline">
               <Link href={`/app/group/series/${encodeURIComponent(group.displayName)}`}>
                 {group.displayName} ({group.items.length})
               </Link>
@@ -251,7 +244,7 @@ export default function SeriesPage() {
           </div>
         </section>
       ))}
-      {allSeries.length > 0 && filteredSeries.length === 0 && !debouncedSearchTerm && !isLoading && (
+      {allSeries.length > 0 && filteredSeries.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <Clapperboard className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
            <p className="text-xl text-muted-foreground">No series to display with current filters or search term.</p>

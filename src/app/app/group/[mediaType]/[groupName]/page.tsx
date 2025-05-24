@@ -13,6 +13,7 @@ import { AlertTriangle, ArrowLeft, Tv2, Film, Clapperboard, ListFilter, Search, 
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { applyParentalFilter } from '@/lib/parental-filter';
+import { processGroupName } from '@/lib/group-name-utils';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -27,11 +28,6 @@ const MEDIA_TYPE_PATHS: Record<MediaType, string> = {
     movie: '/app/movies',
     series: '/app/series',
 }
-
-const normalizeGroupName = (name?: string): string => {
-  if (!name) return 'uncategorized';
-  return name.trim().toLowerCase();
-};
 
 export default function GroupPage() {
   const params = useParams();
@@ -55,11 +51,13 @@ export default function GroupPage() {
   } = usePlaylistStore();
 
   const rawMediaType = Array.isArray(params.mediaType) ? params.mediaType[0] : params.mediaType;
-  const rawGroupName = Array.isArray(params.groupName) ? params.groupName[0] : params.groupName;
+  const rawGroupNameFromUrl = Array.isArray(params.groupName) ? params.groupName[0] : params.groupName;
 
   const mediaType = rawMediaType as MediaType;
-  const decodedGroupName = useMemo(() => rawGroupName ? decodeURIComponent(rawGroupName) : 'Unknown Group', [rawGroupName]);
-  const normalizedDecodedGroupName = useMemo(() => normalizeGroupName(decodedGroupName), [decodedGroupName]);
+  
+  const { displayName: pageDisplayGroupName, normalizedKey: pageNormalizedGroupNameKey } = useMemo(() => {
+    return processGroupName(rawGroupNameFromUrl ? decodeURIComponent(rawGroupNameFromUrl) : 'Uncategorized');
+  }, [rawGroupNameFromUrl]);
 
 
   useEffect(() => {
@@ -67,15 +65,15 @@ export default function GroupPage() {
   }, []);
 
   const groupItems = useMemo(() => {
-    if (!mediaType || !normalizedDecodedGroupName) return [];
+    if (!mediaType || !pageNormalizedGroupNameKey) return [];
     let items = mediaItems.filter(item => {
       const itemRawGroup = item.groupTitle || (item.type === 'movie' || item.type === 'series' ? item.genre : undefined) || 'Uncategorized';
-      const itemNormalizedGroup = normalizeGroupName(itemRawGroup);
-      return item.type === mediaType && itemNormalizedGroup === normalizedDecodedGroupName;
+      const { normalizedKey: itemNormalizedKey } = processGroupName(itemRawGroup);
+      return item.type === mediaType && itemNormalizedKey === pageNormalizedGroupNameKey;
     });
     items = applyParentalFilter(items, parentalControlEnabled);
     return items;
-  }, [mediaItems, mediaType, normalizedDecodedGroupName, parentalControlEnabled]);
+  }, [mediaItems, mediaType, pageNormalizedGroupNameKey, parentalControlEnabled]);
 
 
   useEffect(() => {
@@ -90,21 +88,22 @@ export default function GroupPage() {
   useEffect(() => {
     if (!isClient) return;
     let interval: NodeJS.Timeout | undefined;
-    const combinedLoading = storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0);
+    const combinedLoading = storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && groupItems.length > 0);
 
-    if (combinedLoading && groupItems.length === 0) {
-      setProgressValue(10);
-      interval = setInterval(() => {
+    if (isClient && combinedLoading) {
+        setProgressValue(prev => (prev === 100 ? 10 : prev));
+        interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
-      }, 500);
+        }, 500);
     } else {
-      if (interval) clearInterval(interval);
-      setProgressValue(100);
+        if (interval) clearInterval(interval);
+        setProgressValue(100);
     }
     return () => {
-      if (interval) clearInterval(interval);
+        if (interval) clearInterval(interval);
     };
-  }, [storeIsLoading, epgLoading, epgData, isClient, mediaType, groupItems]);
+  }, [isClient, storeIsLoading, mediaType, epgLoading, epgData, groupItems]);
+
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -135,12 +134,12 @@ export default function GroupPage() {
     return epgData[tvgId].find(prog => now >= prog.start && now < prog.end) || null;
   };
 
-  if (!isClient || ((storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0)) && groupItems.length === 0)) {
+  if (!isClient || (storeIsLoading && groupItems.length === 0)) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-40 mb-2" />
         <Skeleton className="h-12 w-3/4 mb-4" />
-        {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading)) && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
          <div className="relative sm:w-1/2 md:w-1/3 mb-6">
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input type="search" placeholder="Search in this group..." className="w-full pl-10" disabled />
@@ -175,7 +174,7 @@ export default function GroupPage() {
     );
   }
 
-  if (!mediaType || !decodedGroupName || !['channel', 'movie', 'series'].includes(mediaType)) {
+  if (!mediaType || !pageDisplayGroupName || !['channel', 'movie', 'series'].includes(mediaType)) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <XCircle className="w-20 h-20 text-destructive mb-6" />
@@ -192,9 +191,9 @@ export default function GroupPage() {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <PageIcon className="w-24 h-24 text-muted-foreground mb-6" />
-        <h2 className="text-3xl font-semibold mb-3">No Items in "{decodedGroupName}"</h2>
+        <h2 className="text-3xl font-semibold mb-3">No Items in "{pageDisplayGroupName}"</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          There are no {mediaType}s listed under the group "{decodedGroupName}". This might be due to parental control settings.
+          There are no {mediaType}s listed under the group "{pageDisplayGroupName}". This might be due to parental control settings.
         </p>
         <Button onClick={() => router.push(backPath)} size="lg" variant="outline">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to all {mediaType}s
@@ -213,14 +212,14 @@ export default function GroupPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center capitalize">
           <PageIcon className="mr-3 h-8 w-8 text-primary" />
-          {decodedGroupName} ({mediaType}s)
+          {pageDisplayGroupName} ({mediaType}s)
         </h1>
          {groupItems.length > 0 && (
             <div className="relative sm:w-1/2 md:w-1/3">
                 <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                 type="search"
-                placeholder={`Search in ${decodedGroupName}...`}
+                placeholder={`Search in ${pageDisplayGroupName}...`}
                 className="w-full pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -229,12 +228,13 @@ export default function GroupPage() {
         )}
       </div>
 
-      {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0)) && groupItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && groupItems.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+
 
       {filteredGroupItems.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-          <p className="text-xl text-muted-foreground">No {mediaType}s found in "{decodedGroupName}" matching "{debouncedSearchTerm}".</p>
+          <p className="text-xl text-muted-foreground">No {mediaType}s found in "{pageDisplayGroupName}" matching "{debouncedSearchTerm}".</p>
            <Button variant="link" onClick={() => setSearchTerm('')} className="mt-4">Clear Search</Button>
         </div>
       )}
@@ -276,7 +276,7 @@ export default function GroupPage() {
        {groupItems.length > 0 && filteredGroupItems.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <PageIcon className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-           <p className="text-xl text-muted-foreground">No {mediaType}s to display in "{decodedGroupName}" with current filters or search term.</p>
+           <p className="text-xl text-muted-foreground">No {mediaType}s to display in "{pageDisplayGroupName}" with current filters or search term.</p>
          </div>
        )}
     </div>

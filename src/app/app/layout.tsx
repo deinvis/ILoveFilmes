@@ -23,6 +23,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaItem, MediaType } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
+import { processGroupName } from '@/lib/group-name-utils';
 
 interface NavItemConfig {
   value: string;
@@ -44,11 +45,6 @@ const staticNavItems: NavItemConfig[] = [
   { value: 'favorites', href: '/app/favorites', label: 'Favoritos', icon: Heart, isStatic: true },
   { value: 'settings', href: '/app/settings', label: 'Configurações', icon: SettingsIcon, isStatic: true },
 ];
-
-const normalizeGroupName = (name?: string): string => {
-  if (!name) return 'uncategorized';
-  return name.trim().toLowerCase();
-};
 
 const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?: React.ReactNode }> = ({ children, placeholder }) => {
   const [hasMounted, setHasMounted] = useState(false);
@@ -90,13 +86,13 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
     filteredMediaItemsForSidebar.forEach(item => {
       if (item.type && uniqueNormalizedGroups[item.type]) {
         const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        const normalizedGroupKey = normalizeGroupName(rawGroup);
+        const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup);
 
-        if (rawGroup && !uniqueNormalizedGroups[item.type].has(normalizedGroupKey)) {
-          uniqueNormalizedGroups[item.type].add(normalizedGroupKey);
+        if (processedDisplayName && processedDisplayName !== 'Uncategorized' && !uniqueNormalizedGroups[item.type].has(normalizedKey)) {
+          uniqueNormalizedGroups[item.type].add(normalizedKey);
           subs[item.type].push({
-            label: rawGroup, // Use original casing for display
-            href: `/app/group/${item.type}/${encodeURIComponent(rawGroup)}`, // Link uses original casing
+            label: processedDisplayName,
+            href: `/app/group/${item.type}/${encodeURIComponent(processedDisplayName)}`,
           });
         }
       }

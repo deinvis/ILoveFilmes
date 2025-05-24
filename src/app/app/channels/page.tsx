@@ -14,14 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import type { MediaItem, EpgProgram } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
+import { processGroupName } from '@/lib/group-name-utils';
 
 const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
-
-const normalizeGroupName = (name?: string): string => {
-  if (!name) return 'uncategorized';
-  return name.trim().toLowerCase();
-};
 
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
@@ -59,25 +55,24 @@ export default function ChannelsPage() {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0);
+    const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => item.type === 'channel').length > 0);
 
-    if (combinedLoading && mediaItems.length === 0) {
-      setProgressValue(10);
-      interval = setInterval(() => {
+
+    if (isClient && combinedLoading) {
+        setProgressValue(prev => (prev === 100 ? 10 : prev)); // Reset if was 100
+        interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
-      }, 500);
+        }, 500);
     } else {
-      if (interval) {
-        clearInterval(interval);
-      }
-      setProgressValue(100);
+        if (interval) clearInterval(interval);
+        setProgressValue(100);
     }
+
     return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
+        if (interval) clearInterval(interval);
     };
-  }, [storeIsLoading, epgLoading, epgData, isClient, mediaItems]);
+  }, [isClient, storeIsLoading, epgLoading, epgData, mediaItems]);
+
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -117,15 +112,16 @@ export default function ChannelsPage() {
     const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
     filteredChannels.forEach(channel => {
       const rawGroupName = channel.groupTitle || 'Uncategorized';
-      const normalizedKey = normalizeGroupName(rawGroupName);
+      const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName);
+
       if (!groupsMap[normalizedKey]) {
-        groupsMap[normalizedKey] = { displayName: rawGroupName, items: [] };
+        groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
       }
       groupsMap[normalizedKey].items.push(channel);
     });
 
     return Object.entries(groupsMap)
-      .map(([key, value]) => ({ ...value, normalizedKey: key }))
+      .map(([key, value]) => ({ ...value, normalizedKey: key })) // Key here is already normalizedKey
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [filteredChannels]);
 
@@ -136,13 +132,13 @@ export default function ChannelsPage() {
   };
 
 
-  if (!isClient || ((storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length === 0)) {
+  if (!isClient || (storeIsLoading && allChannels.length === 0)) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Channels</h1>
         </div>
-        {isClient && (storeIsLoading || epgLoading) && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -234,7 +230,7 @@ export default function ChannelsPage() {
         )}
       </div>
 
-      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannels.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
 
       {filteredChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
@@ -247,7 +243,7 @@ export default function ChannelsPage() {
       {groupedChannelsArray.map(group => (
         <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-semibold capitalize hover:underline">
+            <h2 className="text-2xl font-semibold hover:underline">
               <Link href={`/app/group/channel/${encodeURIComponent(group.displayName)}`}>
                 {group.displayName} ({group.items.length})
               </Link>
