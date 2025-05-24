@@ -13,19 +13,25 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { applyParentalFilter } from '@/lib/parental-filter';
+import type { MediaItem } from '@/types';
 
-const ITEMS_PER_GROUP_PREVIEW = 4; 
+const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
+
+const normalizeGroupName = (name?: string): string => {
+  if (!name) return 'uncategorized';
+  return name.trim().toLowerCase();
+};
 
 export default function MoviesPage() {
   const [isClient, setIsClient] = useState(false);
-  const { 
-    playlists, 
-    mediaItems, 
-    isLoading, 
-    error, 
+  const {
+    playlists,
+    mediaItems,
+    isLoading,
+    error,
     fetchAndParsePlaylists,
-    parentalControlEnabled 
+    parentalControlEnabled
   } = usePlaylistStore();
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,13 +47,13 @@ export default function MoviesPage() {
       fetchAndParsePlaylists();
     }
   }, [fetchAndParsePlaylists, isClient]);
-  
+
   useEffect(() => {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    if (isLoading && mediaItems.length === 0) { 
-      setProgressValue(10); 
+    if (isLoading && mediaItems.length === 0) {
+      setProgressValue(10);
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
       }, 500);
@@ -55,7 +61,7 @@ export default function MoviesPage() {
       if (interval) {
         clearInterval(interval);
       }
-      setProgressValue(100); 
+      setProgressValue(100);
     }
     return () => {
       if (interval) {
@@ -67,7 +73,7 @@ export default function MoviesPage() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 300); 
+    }, 300);
 
     return () => {
       clearTimeout(handler);
@@ -92,22 +98,27 @@ export default function MoviesPage() {
     if (!debouncedSearchTerm) {
       return allMovies;
     }
-    return allMovies.filter(movie => 
+    return allMovies.filter(movie =>
       movie.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
       (movie.groupTitle && movie.groupTitle.toLowerCase().includes(debouncedSearchTerm.toLowerCase())) ||
       (movie.genre && movie.genre.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
     );
   }, [allMovies, debouncedSearchTerm]);
 
-  const groupedMovies = useMemo(() => {
-    return filteredMovies.reduce((acc, movie) => {
-      const group = movie.groupTitle || movie.genre || 'Uncategorized';
-      if (!acc[group]) {
-        acc[group] = [];
+  const groupedMoviesArray = useMemo(() => {
+    const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
+    filteredMovies.forEach(movie => {
+      const rawGroupName = movie.groupTitle || movie.genre || 'Uncategorized';
+      const normalizedKey = normalizeGroupName(rawGroupName);
+      if (!groupsMap[normalizedKey]) {
+        groupsMap[normalizedKey] = { displayName: rawGroupName, items: [] };
       }
-      acc[group].push(movie);
-      return acc;
-    }, {} as Record<string, typeof filteredMovies>);
+      groupsMap[normalizedKey].items.push(movie);
+    });
+
+    return Object.entries(groupsMap)
+      .map(([key, value]) => ({ ...value, normalizedKey: key }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [filteredMovies]);
 
 
@@ -132,7 +143,7 @@ export default function MoviesPage() {
       </div>
     );
   }
-  
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
@@ -160,7 +171,7 @@ export default function MoviesPage() {
       </div>
     );
   }
-  
+
   if (mediaItems.length > 0 && allMovies.length === 0 && !isLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
@@ -208,9 +219,9 @@ export default function MoviesPage() {
           </div>
         )}
       </div>
-      
+
       {isClient && isLoading && allMovies.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
-      
+
       {filteredMovies.length === 0 && debouncedSearchTerm && !isLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
@@ -219,22 +230,22 @@ export default function MoviesPage() {
         </div>
       )}
 
-       {Object.entries(groupedMovies).map(([groupName, items]) => (
-        <section key={groupName}>
+       {groupedMoviesArray.map(group => (
+        <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold capitalize hover:underline">
-              <Link href={`/app/group/movie/${encodeURIComponent(groupName)}`}>
-                {groupName} ({items.length})
+              <Link href={`/app/group/movie/${encodeURIComponent(group.displayName)}`}>
+                {group.displayName} ({group.items.length})
               </Link>
             </h2>
-            {items.length > ITEMS_PER_GROUP_PREVIEW && (
-               <Link href={`/app/group/movie/${encodeURIComponent(groupName)}`} passHref>
+            {group.items.length > ITEMS_PER_GROUP_PREVIEW && (
+               <Link href={`/app/group/movie/${encodeURIComponent(group.displayName)}`} passHref>
                 <Button variant="link" className="text-sm">View All</Button>
               </Link>
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => (
+            {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => (
               <MediaCard key={item.id} item={item} />
             ))}
           </div>
@@ -249,4 +260,3 @@ export default function MoviesPage() {
     </div>
   );
 }
-

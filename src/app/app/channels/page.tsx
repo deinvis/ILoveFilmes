@@ -15,23 +15,28 @@ import { Label } from '@/components/ui/label';
 import type { MediaItem, EpgProgram } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
 
-const ITEMS_PER_GROUP_PREVIEW = 4; 
+const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
+
+const normalizeGroupName = (name?: string): string => {
+  if (!name) return 'uncategorized';
+  return name.trim().toLowerCase();
+};
 
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
-  const { 
-    playlists, 
-    mediaItems, 
-    isLoading: storeIsLoading, 
-    error: storeError, 
+  const {
+    playlists,
+    mediaItems,
+    isLoading: storeIsLoading,
+    error: storeError,
     fetchAndParsePlaylists,
     epgData,
     epgLoading,
     fetchAndParseEpg,
     parentalControlEnabled
   } = usePlaylistStore();
-  
+
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -40,24 +45,24 @@ export default function ChannelsPage() {
   useEffect(() => {
     setIsClient(true);
   }, []);
-  
+
   useEffect(() => {
     if (isClient) {
       fetchAndParsePlaylists();
-      if (usePlaylistStore.getState().epgUrl) { 
+      if (usePlaylistStore.getState().epgUrl) {
         fetchAndParseEpg();
       }
     }
   }, [fetchAndParsePlaylists, fetchAndParseEpg, isClient]);
-  
+
   useEffect(() => {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
     const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0);
 
-    if (combinedLoading && mediaItems.length === 0) { 
-      setProgressValue(10); 
+    if (combinedLoading && mediaItems.length === 0) {
+      setProgressValue(10);
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
       }, 500);
@@ -65,7 +70,7 @@ export default function ChannelsPage() {
       if (interval) {
         clearInterval(interval);
       }
-      setProgressValue(100); 
+      setProgressValue(100);
     }
     return () => {
       if (interval) {
@@ -77,7 +82,7 @@ export default function ChannelsPage() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 300); 
+    }, 300);
 
     return () => {
       clearTimeout(handler);
@@ -102,21 +107,26 @@ export default function ChannelsPage() {
     if (!debouncedSearchTerm) {
       return allChannels;
     }
-    return allChannels.filter(channel => 
+    return allChannels.filter(channel =>
       channel.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
       (channel.groupTitle && channel.groupTitle.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
     );
   }, [allChannels, debouncedSearchTerm]);
 
-  const groupedChannels = useMemo(() => {
-    return filteredChannels.reduce((acc, channel) => {
-      const group = channel.groupTitle || 'Uncategorized';
-      if (!acc[group]) {
-        acc[group] = [];
+  const groupedChannelsArray = useMemo(() => {
+    const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
+    filteredChannels.forEach(channel => {
+      const rawGroupName = channel.groupTitle || 'Uncategorized';
+      const normalizedKey = normalizeGroupName(rawGroupName);
+      if (!groupsMap[normalizedKey]) {
+        groupsMap[normalizedKey] = { displayName: rawGroupName, items: [] };
       }
-      acc[group].push(channel);
-      return acc;
-    }, {} as Record<string, typeof filteredChannels>);
+      groupsMap[normalizedKey].items.push(channel);
+    });
+
+    return Object.entries(groupsMap)
+      .map(([key, value]) => ({ ...value, normalizedKey: key }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [filteredChannels]);
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
@@ -160,7 +170,7 @@ export default function ChannelsPage() {
       </div>
     );
   }
-  
+
   if (playlists.length === 0 && !storeIsLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
@@ -225,7 +235,7 @@ export default function ChannelsPage() {
       </div>
 
       {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && allChannels.length > 0 && mediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
-      
+
       {filteredChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
           <Search className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
@@ -234,28 +244,28 @@ export default function ChannelsPage() {
         </div>
       )}
 
-      {Object.entries(groupedChannels).map(([groupName, items]) => (
-        <section key={groupName}>
+      {groupedChannelsArray.map(group => (
+        <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold capitalize hover:underline">
-              <Link href={`/app/group/channel/${encodeURIComponent(groupName)}`}>
-                {groupName} ({items.length})
+              <Link href={`/app/group/channel/${encodeURIComponent(group.displayName)}`}>
+                {group.displayName} ({group.items.length})
               </Link>
             </h2>
-            {items.length > ITEMS_PER_GROUP_PREVIEW && (
-              <Link href={`/app/group/channel/${encodeURIComponent(groupName)}`} passHref>
+            {group.items.length > ITEMS_PER_GROUP_PREVIEW && (
+              <Link href={`/app/group/channel/${encodeURIComponent(group.displayName)}`} passHref>
                 <Button variant="link" className="text-sm">View All</Button>
               </Link>
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => {
+            {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(item => {
               const nowPlayingProgram = getNowPlaying(item.tvgId);
               return (
-                <MediaCard 
-                  key={item.id} 
-                  item={item} 
-                  nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined} 
+                <MediaCard
+                  key={item.id}
+                  item={item}
+                  nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}
                 />
               );
             })}
@@ -271,4 +281,3 @@ export default function ChannelsPage() {
     </div>
   );
 }
-

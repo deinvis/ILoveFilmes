@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation'; 
+import { usePathname, useRouter } from 'next/navigation';
 import { Tv2, Film, Clapperboard, Settings as SettingsIcon, PlaySquare, Menu, ChevronDown, Heart, History } from 'lucide-react';
 import {
   SidebarProvider,
@@ -13,25 +13,24 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  // SidebarInset, // No longer used directly here, AppLayout is the inset
-  SidebarMenuSkeleton, 
+  SidebarMenuSkeleton,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'; 
+import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import React, { useMemo, useState, useEffect } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaItem, MediaType } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
 
 interface NavItemConfig {
-  value: string; 
+  value: string;
   href: string;
   label: string;
   icon: React.ElementType;
   mediaType?: MediaType;
-  isStatic?: boolean; 
+  isStatic?: boolean;
 }
 
 const mainCategoryNavItems: NavItemConfig[] = [
@@ -45,6 +44,11 @@ const staticNavItems: NavItemConfig[] = [
   { value: 'favorites', href: '/app/favorites', label: 'Favoritos', icon: Heart, isStatic: true },
   { value: 'settings', href: '/app/settings', label: 'Configurações', icon: SettingsIcon, isStatic: true },
 ];
+
+const normalizeGroupName = (name?: string): string => {
+  if (!name) return 'uncategorized';
+  return name.trim().toLowerCase();
+};
 
 const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?: React.ReactNode }> = ({ children, placeholder }) => {
   const [hasMounted, setHasMounted] = useState(false);
@@ -64,7 +68,7 @@ const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?
 const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, closeMobileSheet?: () => void }) => {
   const pathname = usePathname();
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
-  
+
   const { mediaItems, parentalControlEnabled } = usePlaylistStore();
 
   const subcategories = useMemo(() => {
@@ -77,20 +81,22 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
 
     const filteredMediaItemsForSidebar = applyParentalFilter(mediaItems, parentalControlEnabled);
 
-    const uniqueGroups: Record<string, Set<string>> = { 
+    const uniqueNormalizedGroups: Record<MediaType, Set<string>> = {
       channel: new Set(),
       movie: new Set(),
       series: new Set(),
     };
 
     filteredMediaItemsForSidebar.forEach(item => {
-      if (item.type && uniqueGroups[item.type]) {
-        const group = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        if (group && !uniqueGroups[item.type].has(group)) { 
-          uniqueGroups[item.type].add(group);
+      if (item.type && uniqueNormalizedGroups[item.type]) {
+        const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
+        const normalizedGroupKey = normalizeGroupName(rawGroup);
+
+        if (rawGroup && !uniqueNormalizedGroups[item.type].has(normalizedGroupKey)) {
+          uniqueNormalizedGroups[item.type].add(normalizedGroupKey);
           subs[item.type].push({
-            label: group,
-            href: `/app/group/${item.type}/${encodeURIComponent(group)}`,
+            label: rawGroup, // Use original casing for display
+            href: `/app/group/${item.type}/${encodeURIComponent(rawGroup)}`, // Link uses original casing
           });
         }
       }
@@ -99,19 +105,19 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
     Object.values(subs).forEach(list => list.sort((a, b) => a.label.localeCompare(b.label)));
     return subs;
   }, [mediaItems, parentalControlEnabled]);
-  
+
   useEffect(() => {
     const currentMainCategory = mainCategoryNavItems.find(item => item.mediaType && pathname.startsWith(`/app/group/${item.mediaType}/`));
     if (currentMainCategory && !openSubmenus[currentMainCategory.value]) {
       setOpenSubmenus(prev => ({ ...prev, [currentMainCategory.value]: true }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]); 
+  }, [pathname]);
 
   const toggleSubmenu = (itemValue: string) => {
     setOpenSubmenus(prev => ({ ...prev, [itemValue]: !prev[itemValue] }));
   };
-  
+
   const handleLinkClickAndCloseSheet = () => {
     if (isMobile && closeMobileSheet) {
       closeMobileSheet();
@@ -124,7 +130,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
         const categorySubItems = item.mediaType ? subcategories[item.mediaType] : [];
         const hasSubItems = categorySubItems.length > 0;
         const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
-        
+
         const handleMainItemClick = () => {
           if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
             handleLinkClickAndCloseSheet();
@@ -138,27 +144,25 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                 isActive={isMainActive}
                 className={cn(
                   "w-full",
-                  hasSubItems ? "justify-between" : "justify-start" 
+                  hasSubItems ? "justify-between" : "justify-start"
                 )}
                 onClick={() => {
                   if (hasSubItems) {
                     toggleSubmenu(item.value);
                   }
-                  // If not hasSubItems, the click is handled by the Link itself if asChild is true
-                  // If hasSubItems, this click only toggles. The Link's click handler will navigate.
                 }}
                 tooltip={item.label}
-                asChild={!hasSubItems} 
+                asChild={!hasSubItems}
               >
                 {!hasSubItems ? (
                   <Link
                     href={item.href}
-                    passHref 
-                    legacyBehavior={false} // Important for asChild with modern Next.js Link
-                    onClick={handleMainItemClick} 
-                    className="flex items-center flex-grow" 
+                    passHref
+                    legacyBehavior={false}
+                    onClick={handleMainItemClick}
+                    className="flex items-center flex-grow"
                   >
-                    <item.icon className="h-5 w-5 mr-2 shrink-0" /> 
+                    <item.icon className="h-5 w-5 mr-2 shrink-0" />
                     <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                   </Link>
                 ) : (
@@ -166,22 +170,22 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                     <Link
                       href={item.href}
                       passHref
-                      legacyBehavior={false} 
-                      className="flex items-center flex-grow" 
-                      onClick={handleMainItemClick} 
+                      legacyBehavior={false}
+                      className="flex items-center flex-grow"
+                      onClick={handleMainItemClick}
                     >
                       <item.icon className="h-5 w-5 mr-2 shrink-0" />
                       <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                     </Link>
                     <ChevronDown
                       className={cn(
-                        "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0", 
+                        "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
                         openSubmenus[item.value] ? "rotate-180" : ""
                       )}
-                      onClick={(e) => { 
-                          e.stopPropagation(); 
-                          e.preventDefault(); // Prevent Link navigation if only toggling
-                          toggleSubmenu(item.value); 
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          toggleSubmenu(item.value);
                       }}
                     />
                   </>
@@ -196,11 +200,10 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                       <Link href={subItem.href} passHref legacyBehavior={false} className="w-full">
                         <SidebarMenuButton
                           isActive={pathname === subItem.href}
-                          className="w-full justify-start h-auto py-1.5 text-xs font-normal" 
+                          className="w-full justify-start h-auto py-1.5 text-xs font-normal"
                           onClick={handleLinkClickAndCloseSheet}
                           tooltip={subItem.label}
                         >
-                          {/* No icon for sub-items by default, add if needed */}
                           <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
                         </SidebarMenuButton>
                       </Link>
@@ -257,7 +260,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <PlaySquare className="h-8 w-8 text-primary" />
               </Link>
           </SidebarHeader>
-          <SidebarContent className="p-2"> {/* Removed flex-grow from here */}
+          <SidebarContent className="p-2">
             <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
               <NavLinks closeMobileSheet={() => setIsMobileSheetOpen(false)} />
             </ClientSideOnlyRenderer>
@@ -269,9 +272,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </SidebarFooter>
         </Sidebar>
-        
+
         {/* Main content area */}
-        <div className="flex-1 flex flex-col overflow-hidden"> {/* This acts as SidebarInset */}
+        <div className="flex-1 flex flex-col overflow-hidden">
           <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background px-6 md:hidden">
             <Sheet open={isMobileSheetOpen} onOpenChange={setIsMobileSheetOpen}>
               <SheetTrigger asChild>
@@ -281,13 +284,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0">
-                <MobileSheetHeader className="p-4 border-b"> 
+                <MobileSheetHeader className="p-4 border-b">
                    <Link href="/app/channels" className="flex items-center gap-2" onClick={() => setIsMobileSheetOpen(false)}>
                       <PlaySquare className="h-8 w-8 text-primary" />
                       <SheetTitle className="text-xl font-bold">StreamVerse</SheetTitle>
                     </Link>
                 </MobileSheetHeader>
-                <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto"> 
+                <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto">
                   <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
                     <NavLinks isMobile closeMobileSheet={() => setIsMobileSheetOpen(false)} />
                   </ClientSideOnlyRenderer>
@@ -310,4 +313,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
-
