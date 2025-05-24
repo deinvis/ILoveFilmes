@@ -8,8 +8,7 @@ export interface ExtractedChannelInfo {
 
 // ORDER MATTERS: LONGEST AND MOST SPECIFIC FIRST
 const COMPLEX_QUALITY_TAGS: string[] = [
-  'FHD H265', 'HD H265',
-  'FHD HEVC', 'HD HEVC',
+  'FHD H265 HEVC', 'FHD H265', 'FHD HEVC', 'HD H265', 'HD HEVC',
   '4K UHD', 'UHD 4K', // Common variations of 4K
 ];
 
@@ -27,26 +26,30 @@ const SEPARATORS_CHARS = ['|', '-', '–', '—', '(', ')', '[', ']'];
 // Escaped version for use in regex character class
 const SEPARATORS_CHARS_ESCAPED_FOR_REGEX_CLASS = SEPARATORS_CHARS.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
 
-
 export function extractChannelInfo(title?: string): ExtractedChannelInfo {
   const originalTrimmedTitle = (title || '').trim();
   if (!originalTrimmedTitle) {
     return { baseName: 'Canal Desconhecido', qualityTag: undefined };
   }
 
-  for (const tag of ALL_QUALITY_TAGS_ORDERED) {
-    // Regex for the tag part, allowing for multiple spaces within the tag itself (e.g., "FHD   H265")
-    const tagRegexPart = tag
+  // Specific override for "Globo SP Capital"
+  if (originalTrimmedTitle.toUpperCase() === "GLOBO SP CAPITAL") {
+    return { baseName: "Globo SP", qualityTag: "Capital" };
+  }
+
+  for (const coreTag of ALL_QUALITY_TAGS_ORDERED) {
+    // Regex part for the core tag itself, allowing for multiple spaces within the tag
+    const tagRegexPart = coreTag
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape special regex characters in the tag
       .replace(/\s+/g, '[ \t\u00A0]+'); // Match one or more space-like characters for spaces within the tag
 
     // Regex for optional variant suffixes (e.g., "²", " 2", "¹")
-    // Allows optional space(s), then any number of (superscript 1/2/3 or digit)
-    const variantSuffixPattern = `(?:[ \t\u00A0]*[¹²³\\d]*)?`;
+    const variantSuffixPattern = `(?:[\\s\\d²³¹]*)?`; // Added ¹
     const fullQualityPatternString = `${tagRegexPart}${variantSuffixPattern}`;
 
     // Attempt 1: Try with one or more space-like characters as a separator
     // Captures: (1: baseName) (2: space separator) (3: fullQualityPatternString)
+    // Ensure the space separator is present and not just part of a word
     const spaceSeparatedRegexString = `^(.+?)([ \t\u00A0]+)(${fullQualityPatternString})$`;
     const spaceSeparatedRegex = new RegExp(spaceSeparatedRegexString, 'i');
     let match = originalTrimmedTitle.match(spaceSeparatedRegex);
@@ -54,48 +57,41 @@ export function extractChannelInfo(title?: string): ExtractedChannelInfo {
     if (match && match[1] && match[3]) {
       const potentialBaseName = match[1].trim();
       const matchedQualityTag = match[3].trim();
-      // Ensure baseName is not empty or just spaces after trimming
       if (potentialBaseName) {
-        // console.log(`extractChannelInfo DEBUG (Space): Title='${originalTrimmedTitle}', Tag='${tag}', Base='${potentialBaseName}', Quality='${matchedQualityTag}'`);
         return { baseName: potentialBaseName, qualityTag: matchedQualityTag };
       }
     }
 
-    // Attempt 2: Try with other defined separators (if space separation didn't work or didn't yield a baseName)
-    if (!match || (match && !match[1].trim())) { // Also try if previous baseName was empty
-      for (const sepChar of SEPARATORS_CHARS) {
-        const escapedSepChar = sepChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Captures: (1: baseName) (2: separator group) (3: fullQualityPatternString)
-        const otherSeparatorRegexString = `^(.+?)([ \t\u00A0]*${escapedSepChar}[ \t\u00A0]*)(${fullQualityPatternString})$`;
-        const otherSeparatorRegex = new RegExp(otherSeparatorRegexString, 'i');
-        let sepMatch = originalTrimmedTitle.match(otherSeparatorRegex);
+    // Attempt 2: Try with other defined separators
+    for (const sepChar of SEPARATORS_CHARS) {
+      const escapedSepChar = sepChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Captures: (1: baseName) (2: separator group) (3: fullQualityPatternString)
+      const otherSeparatorRegexString = `^(.+?)([ \t\u00A0]*${escapedSepChar}[ \t\u00A0]*)(${fullQualityPatternString})$`;
+      const otherSeparatorRegex = new RegExp(otherSeparatorRegexString, 'i');
+      let sepMatch = originalTrimmedTitle.match(otherSeparatorRegex);
 
-        if (sepMatch && sepMatch[1] && sepMatch[3]) {
-          const potentialBaseName = sepMatch[1].trim();
-          const matchedQualityTag = sepMatch[3].trim();
-          if (potentialBaseName) {
-            // console.log(`extractChannelInfo DEBUG (Separator '${sepChar}'): Title='${originalTrimmedTitle}', Tag='${tag}', Base='${potentialBaseName}', Quality='${matchedQualityTag}'`);
-            return { baseName: potentialBaseName, qualityTag: matchedQualityTag };
-          }
+      if (sepMatch && sepMatch[1] && sepMatch[3]) {
+        const potentialBaseName = sepMatch[1].trim();
+        const matchedQualityTag = sepMatch[3].trim();
+        if (potentialBaseName) {
+          return { baseName: potentialBaseName, qualityTag: matchedQualityTag };
         }
       }
     }
   }
 
   // Fallback: Check if the entire title is just a quality tag (e.g., "HD", "FHD H265¹")
-  for (const tag of ALL_QUALITY_TAGS_ORDERED) {
-    const tagRegexPart = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[ \t\u00A0]+');
-    const variantSuffixPattern = `(?:[ \t\u00A0]*[¹²³\\d]*)?`;
+  for (const coreTag of ALL_QUALITY_TAGS_ORDERED) {
+    const tagRegexPart = coreTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[ \t\u00A0]+');
+    const variantSuffixPattern = `(?:[\\s\\d²³¹]*)?`;
     const fullQualityPatternString = `${tagRegexPart}${variantSuffixPattern}`;
     const qualityOnlyRegex = new RegExp(`^(${fullQualityPatternString})$`, 'i');
 
     if (qualityOnlyRegex.test(originalTrimmedTitle)) {
-      // console.log(`extractChannelInfo DEBUG (Quality Only): Title='${originalTrimmedTitle}', Base='${originalTrimmedTitle}', Quality='${originalTrimmedTitle}'`);
       return { baseName: originalTrimmedTitle, qualityTag: originalTrimmedTitle };
     }
   }
 
-  // Default: No specific quality tag pattern found by the above methods
-  // console.log(`extractChannelInfo DEBUG (Default): Title='${originalTrimmedTitle}', Base='${originalTrimmedTitle}', Quality='undefined'`);
+  // Default: No specific quality tag pattern found
   return { baseName: originalTrimmedTitle, qualityTag: undefined };
 }
