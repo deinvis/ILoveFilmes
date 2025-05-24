@@ -9,7 +9,7 @@ export interface PlaylistItem {
   type: PlaylistType;
   name?: string;
   addedAt: string;
-  source?: 'url' | 'file';
+  source?: 'url' | 'file'; // 'file' means content was from an uploaded file, not persisted itself.
 
   // For M3U type (if source is 'url')
   url?: string;
@@ -31,12 +31,12 @@ export interface MediaItem {
   streamUrl: string;
   description?: string;
   genre?: string;
-  groupTitle?: string;
+  groupTitle?: string; // Raw group-title from M3U
   tvgId?: string;
   originatingPlaylistId: string;
   originatingPlaylistName?: string;
-  baseName?: string;
-  qualityTag?: string;
+  baseName?: string;      // Extracted base name, e.g., "ESPN" from "ESPN HD"
+  qualityTag?: string;    // Extracted quality, e.g., "HD" from "ESPN HD"
 }
 
 export interface EpgProgram {
@@ -55,7 +55,7 @@ export interface RecentlyPlayedItem {
 export interface PlaybackProgressData {
   currentTime: number;
   duration: number;
-  lastUpdatedAt: number; // Added timestamp for LRU cache strategy
+  lastUpdatedAt: number;
 }
 
 export interface XCUserInfo {
@@ -78,4 +78,62 @@ export interface XCAPIResponse {
   server_info?: {
     [key: string]: any;
   };
+}
+
+// For Zustand persist middleware
+export type PersistentPlaylistState = Pick<
+  PlaylistState, // Ensure PlaylistState is defined or imported if this is in a separate file from the store
+  'playlists' | 
+  'epgUrl' | 
+  'preferredStartPage' | 
+  'favoriteItemIds' | 
+  'playbackProgress' | 
+  'recentlyPlayed' | 
+  'parentalControlEnabled' |
+  'fileBasedMediaItems' |
+  'manuallyWatchedItemIds' // Added for manual watched status
+>;
+
+// Forward declaration for PlaylistState if it's defined in playlistStore.ts
+// This helps avoid circular dependencies if types are split.
+// If PlaylistState is defined in this file, this is not strictly necessary.
+export interface PlaylistState {
+  playlists: PlaylistItem[];
+  mediaItems: MediaItem[];
+  fileBasedMediaItems: MediaItem[];
+  addPlaylist: (playlistData: {
+    type: PlaylistType;
+    url?: string;
+    xcDns?: string;
+    xcUsername?: string;
+    xcPassword?: string;
+    name?: string;
+  }) => Promise<void>;
+  addPlaylistFromFileContent: (fileContent: string, fileName: string) => Promise<void>;
+  removePlaylist: (id: string) => void;
+  updatePlaylist: (playlistId: string, updates: Partial<PlaylistItem>) => Promise<void>;
+  fetchAndParsePlaylists: (forceRefresh?: boolean) => Promise<void>;
+  isLoading: boolean;
+  error: string | null;
+  epgUrl: string | null;
+  epgData: Record<string, EpgProgram[]>;
+  epgLoading: boolean;
+  epgError: string | null;
+  setEpgUrl: (url: string | null) => Promise<void>;
+  fetchAndParseEpg: (forceRefresh?: boolean) => Promise<void>;
+  preferredStartPage: StartPagePath;
+  setPreferredStartPage: (path: StartPagePath) => void;
+  favoriteItemIds: string[];
+  toggleFavorite: (itemId: string) => void;
+  isFavorite: (itemId: string) => boolean;
+  playbackProgress: Record<string, PlaybackProgressData>;
+  updatePlaybackProgress: (itemId: string, currentTime: number, duration: number) => void;
+  getPlaybackProgress: (itemId: string) => PlaybackProgressData | undefined;
+  recentlyPlayed: RecentlyPlayedItem[];
+  addRecentlyPlayed: (itemId: string) => void;
+  parentalControlEnabled: boolean;
+  setParentalControlEnabled: (enabled: boolean) => void;
+  manuallyWatchedItemIds: string[]; // Added
+  toggleManuallyWatched: (itemId: string) => void; // Added
+  resetAppState: () => void;
 }
