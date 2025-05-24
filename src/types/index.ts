@@ -7,34 +7,36 @@ export type PlaylistType = 'm3u' | 'xc';
 export interface PlaylistItem {
   id: string;
   type: PlaylistType;
-  name?: string; 
+  name?: string;
   addedAt: string;
   source?: 'url' | 'file'; // To distinguish between URL-based and file-based M3U lists
 
   // For M3U type (if source is 'url')
-  url?: string; 
-  
+  url?: string;
+
   // For XC type
   xcDns?: string;
   xcUsername?: string;
   xcPassword?: string;
-  
+
   // Optional fields, mainly for XC type
   expiryDate?: string; // Store as ISO string
 }
 
 export interface MediaItem {
-  id: string; 
+  id: string;
   type: MediaType;
-  title: string;
+  title: string; // Full original title, e.g., "ESPN HD", "GLOBO SP SD"
   posterUrl?: string;
   streamUrl: string;
   description?: string;
   genre?: string;
-  groupTitle?: string; // This is the group-title from M3U, or genre for VOD if tvg-genre is absent
+  groupTitle?: string; // This is the group-title from M3U
   tvgId?: string;
-  originatingPlaylistId: string; 
-  originatingPlaylistName?: string; 
+  originatingPlaylistId: string;
+  originatingPlaylistName?: string;
+  baseName?: string; // Extracted base name, e.g., "ESPN", "GLOBO SP"
+  qualityTag?: string; // Extracted quality, e.g., "HD", "SD"
 }
 
 export interface EpgProgram {
@@ -42,11 +44,11 @@ export interface EpgProgram {
   description?: string;
   start: Date;
   end: Date;
-  channelId: string; 
+  channelId: string;
 }
 
 export interface RecentlyPlayedItem {
-  itemId: string; 
+  itemId: string;
   timestamp: number;
 }
 
