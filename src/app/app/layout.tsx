@@ -134,7 +134,10 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
             <SidebarMenuItem>
                <SidebarMenuButton
                 isActive={isMainActive}
-                className="w-full justify-between"
+                className={cn(
+                  "w-full",
+                  hasSubItems ? "justify-between" : "justify-start" 
+                )}
                 onClick={() => {
                   if (hasSubItems) {
                     toggleSubmenu(item.value);
