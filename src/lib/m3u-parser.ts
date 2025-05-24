@@ -1,20 +1,23 @@
 
-import type { MediaItem, MediaType } from '@/types';
+import type { MediaItem, MediaType, PlaylistItem } from '@/types';
 
-const MAX_ITEMS_PER_PLAYLIST = 5000;
+const MAX_ITEMS_PER_PLAYLIST = 100; // Keep this for now, can be adjusted
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 const SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 
+// Keywords for group-title based categorization
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados'];
 const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'animes'];
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal'];
 
+// Keywords for title-based categorization (lower priority)
 const TITLE_MOVIE_KEYWORDS = ['movie', 'film', 'pelicula'];
 const TITLE_SERIES_KEYWORDS = ['series', 'serie', 'série', 'tvshow', 'season', 'episode', 'temporada', 'episodio', 'anime'];
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal'];
 
-export async function parseM3U(playlistUrl: string, playlistId: string): Promise<MediaItem[]> {
-  console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId}, Original URL: ${playlistUrl}. Item limit: ${MAX_ITEMS_PER_PLAYLIST}`);
+
+export async function parseM3U(playlistUrl: string, playlistId: string, playlistName?: string): Promise<MediaItem[]> {
+  console.log(`Fetching and parsing M3U via proxy for playlist ID: ${playlistId} (Name: ${playlistName || 'N/A'}), Original URL: ${playlistUrl}. Item limit: ${MAX_ITEMS_PER_PLAYLIST}`);
   let m3uString: string;
   const proxyApiUrl = `/api/proxy?url=${encodeURIComponent(playlistUrl)}`;
 
@@ -83,7 +86,7 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
     }
 
     if (line.startsWith('#EXTINF:')) {
-      currentRawItem = { originatingPlaylistId: playlistId };
+      currentRawItem = { originatingPlaylistId: playlistId, originatingPlaylistName: playlistName };
       const infoLineContent = line.substring(line.indexOf(':') + 1);
 
       const lastCommaIndex = infoLineContent.lastIndexOf(',');
@@ -127,18 +130,20 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
       if (currentRawItem.title ) {
         const streamUrl = line;
         const {
-          posterUrl, // from tvg-logo
-          grouptitle, // from group-title attribute
-          tvggenre, // from tvg-genre attribute
+          posterUrl,
+          grouptitle,
+          tvggenre,
           tvgId,
-          originatingPlaylistId
+          originatingPlaylistId: itemOriginatingPlaylistId, // from currentRawItem
+          originatingPlaylistName: itemOriginatingPlaylistName // from currentRawItem
         } = currentRawItem;
 
         const finalTitle = currentRawItem.title;
 
         const itemIndexInFile = items.length;
+        // Ensure unique ID even if tvgId is missing or duplicated within the same playlist file
         let semanticPart = tvgId || currentRawItem.tvgchno || finalTitle.replace(/[^a-zA-Z0-9-_]/g, '').substring(0, 30) || `item${itemIndexInFile}`;
-        const itemId = `${originatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
+        const itemId = `${itemOriginatingPlaylistId}-${semanticPart}-${itemIndexInFile}`;
 
         let mediaType: MediaType;
         const lowerGroupTitle = (grouptitle || '').toLowerCase();
@@ -146,14 +151,14 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         const lowerStreamUrl = streamUrl.toLowerCase();
         const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
         
-        // Prioritized Rules:
+        // Prioritized Rules for MediaType:
         if (lowerStreamUrl.endsWith('.ts')) {
             mediaType = 'channel';
-        } else if (lowerStreamUrl.includes('series')) {
+        } else if (lowerStreamUrl.includes('series')) { // Check URL first for explicit types
             mediaType = 'series';
         } else if (lowerStreamUrl.includes('movies')) {
             mediaType = 'movie';
-        } else if (lowerTitle.includes('ppv')) { 
+        } else if (lowerTitle.includes('ppv')) { // PPV in title is a strong indicator for channel
             mediaType = 'channel';
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
@@ -164,10 +169,8 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         } else if (isVODStreamByExtension) {
           if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
             mediaType = 'series';
-          } else if (TITLE_MOVIE_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
+          } else { // Default VOD to movie if not series
             mediaType = 'movie';
-          } else {
-            mediaType = 'movie'; 
           }
         } else if (SERIES_PATTERN.test(finalTitle) || TITLE_SERIES_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'series';
@@ -176,15 +179,19 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
         } else if (GENERAL_TITLE_CHANNEL_KEYWORDS.some(keyword => lowerTitle.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          mediaType = 'channel'; 
+          mediaType = 'channel'; // Fallback
         }
 
         let finalGenre: string | undefined = undefined;
         if (mediaType === 'movie' || mediaType === 'series') {
-            if (tvggenre) { // Prefer tvg-genre if it exists
-                finalGenre = tvggenre;
-            } else if (grouptitle) { // Fallback to group-title for VOD genre
-                finalGenre = grouptitle;
+            if (tvggenre && tvggenre.trim() !== '') {
+                finalGenre = tvggenre.trim();
+            } else if (grouptitle && grouptitle.trim() !== '' && (mediaType === 'movie' || mediaType === 'series')) { 
+                // Use group-title as genre for VOD if tvg-genre is missing
+                // and it's not a channel group
+                if (!GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+                    finalGenre = grouptitle.trim();
+                }
             }
         }
 
@@ -194,16 +201,18 @@ export async function parseM3U(playlistUrl: string, playlistId: string): Promise
           title: finalTitle,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: grouptitle, // Always the raw group-title from M3U
+          groupTitle: grouptitle,
           tvgId: tvgId,
-          genre: finalGenre, // Derived from tvg-genre or group-title for VOD
-          description: `Title: ${finalTitle}. Group: ${grouptitle || 'N/A'}. Type: ${mediaType}. Parsed from playlist: ${playlistId}`,
+          genre: finalGenre,
+          description: currentRawItem.description || `Title: ${finalTitle}. Group: ${grouptitle || 'N/A'}. Type: ${mediaType}. Parsed from playlist: ${playlistName || playlistId}`,
+          originatingPlaylistId: itemOriginatingPlaylistId,
+          originatingPlaylistName: itemOriginatingPlaylistName,
         };
         items.push(mediaItem);
-        currentRawItem = {};
+        currentRawItem = {}; // Reset for next item
       }
     }
   }
-  console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (via proxy for playlistId: ${playlistId})`);
+  console.log(`Parsed ${items.length} items from original URL: ${playlistUrl} (Playlist: ${playlistName || playlistId})`);
   return items;
 }

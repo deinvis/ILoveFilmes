@@ -10,15 +10,17 @@ export interface PlaylistItem {
 }
 
 export interface MediaItem {
-  id: string;
+  id: string; // Unique ID for this specific instance of the media item from a specific playlist
   type: MediaType;
   title: string;
   posterUrl?: string;
   streamUrl: string;
   description?: string;
-  genre?: string; // Primarily from M3U group-title for series/movies or tvg-genre
-  groupTitle?: string; // For M3U group-title
-  tvgId?: string; // tvg-id from M3U, used for EPG mapping
+  genre?: string;
+  groupTitle?: string;
+  tvgId?: string;
+  originatingPlaylistId: string; // ID of the PlaylistItem it came from
+  originatingPlaylistName?: string; // Name of the PlaylistItem it came from
 }
 
 export interface EpgProgram {
@@ -26,10 +28,15 @@ export interface EpgProgram {
   description?: string;
   start: Date;
   end: Date;
-  channelId: string;
+  channelId: string; // Corresponds to MediaItem.tvgId
 }
 
 export interface RecentlyPlayedItem {
-  itemId: string;
+  itemId: string; // Corresponds to MediaItem.id
   timestamp: number;
+}
+
+export interface PlaybackProgressData {
+  currentTime: number;
+  duration: number;
 }

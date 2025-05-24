@@ -3,21 +3,16 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
-import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath, RecentlyPlayedItem } from '@/types';
+import type { PlaylistItem, MediaItem, EpgProgram, StartPagePath, RecentlyPlayedItem, PlaybackProgressData } from '@/types';
 import { parseM3U } from '@/lib/m3u-parser';
 import { parseXMLTV } from '@/lib/xmltv-parser';
-
-interface PlaybackProgressData {
-  currentTime: number;
-  duration: number;
-}
 
 const MAX_RECENTLY_PLAYED_ITEMS = 20;
 const DEFAULT_START_PAGE: StartPagePath = '/app/channels';
 
 interface PlaylistState {
   playlists: PlaylistItem[];
-  mediaItems: MediaItem[];
+  mediaItems: MediaItem[]; // Will not be persisted
   addPlaylist: (url: string, name?: string) => Promise<void>;
   removePlaylist: (id: string) => void;
   fetchAndParsePlaylists: (forceRefresh?: boolean) => Promise<void>;
@@ -45,13 +40,14 @@ interface PlaylistState {
   recentlyPlayed: RecentlyPlayedItem[];
   addRecentlyPlayed: (itemId: string) => void;
 
-  resetAppState: () => void; // New action
+  resetAppState: () => void;
 }
 
 const getLocalStorage = () => {
   if (typeof window !== 'undefined') {
     return localStorage;
   }
+  // Provide a mock storage for SSR or environments where localStorage is not available
   return {
     getItem: () => null,
     setItem: () => {},
@@ -59,7 +55,11 @@ const getLocalStorage = () => {
   };
 };
 
-type PersistentPlaylistState = Pick<PlaylistState, 'playlists' | 'epgUrl' | 'preferredStartPage' | 'favoriteItemIds' | 'playbackProgress' | 'recentlyPlayed'>;
+// Define which parts of the state to persist
+type PersistentPlaylistState = Pick<
+  PlaylistState, 
+  'playlists' | 'epgUrl' | 'preferredStartPage' | 'favoriteItemIds' | 'playbackProgress' | 'recentlyPlayed'
+>;
 
 const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
   name: 'streamverse-storage', 
@@ -79,6 +79,7 @@ const persistOptions: PersistOptions<PlaylistState, PersistentPlaylistState> = {
         console.error("StreamVerse: Failed to rehydrate state from localStorage:", error);
       } else {
         console.log("StreamVerse: Successfully rehydrated state from localStorage.");
+        // Defer store actions until after initial hydration and component mount
         setTimeout(() => {
             const currentState = usePlaylistStore.getState();
             const { playlists, mediaItems, epgUrl, epgData } = currentState;
@@ -101,7 +102,7 @@ export const usePlaylistStore = create<PlaylistState>()(
   persist(
     (set, get) => ({
       playlists: [],
-      mediaItems: [], 
+      mediaItems: [], // Not persisted
       isLoading: false,
       error: null,
 
@@ -142,7 +143,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         } else if (duration > 0 && currentTime / duration >= 0.95) { 
           set(state => {
             const newProgress = { ...state.playbackProgress };
-            delete newProgress[itemId];
+            delete newProgress[itemId]; // Remove progress if watched to near completion
             return { playbackProgress: newProgress };
           });
         }
@@ -191,8 +192,12 @@ export const usePlaylistStore = create<PlaylistState>()(
       removePlaylist: (id: string) => {
         set((state) => ({
           playlists: state.playlists.filter((p) => p.id !== id),
+          mediaItems: state.mediaItems.filter(item => item.originatingPlaylistId !== id) // Also remove items from this playlist
         }));
-        get().fetchAndParsePlaylists(true); 
+        // No need to call fetchAndParsePlaylists here if we manually remove items,
+        // unless there's a desire to re-evaluate duplicates from remaining lists.
+        // For simplicity now, we'll just remove them.
+        // If full re-parse is needed: get().fetchAndParsePlaylists(true);
       },
       fetchAndParsePlaylists: async (forceRefresh = false) => {
         if (!forceRefresh && get().mediaItems.length > 0 && !get().isLoading) {
@@ -215,7 +220,7 @@ export const usePlaylistStore = create<PlaylistState>()(
           }
 
           const results = await Promise.allSettled(
-            currentPlaylists.map(playlist => parseM3U(playlist.url, playlist.id))
+            currentPlaylists.map(playlist => parseM3U(playlist.url, playlist.id, playlist.name))
           );
 
           results.forEach((result, index) => {
@@ -320,12 +325,6 @@ export const usePlaylistStore = create<PlaylistState>()(
           playbackProgress: {},
           recentlyPlayed: [],
         });
-        // Persist middleware will update localStorage due to state change.
-        // Optionally, force a reload to ensure a completely fresh start,
-        // though not strictly necessary if components react to store changes.
-        // if (typeof window !== 'undefined') {
-        //   window.location.reload();
-        // }
       },
     }),
     persistOptions
