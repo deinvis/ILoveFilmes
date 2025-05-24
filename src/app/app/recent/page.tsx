@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/input';
 import type { MediaItem, EpgProgram, RecentlyPlayedItem } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
 
+const ITEMS_PER_PAGE = 20;
+
 export default function RecentlyPlayedPage() {
   const [isClient, setIsClient] = useState(false);
   const { 
@@ -29,6 +31,7 @@ export default function RecentlyPlayedPage() {
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     setIsClient(true);
@@ -47,9 +50,9 @@ export default function RecentlyPlayedPage() {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0);
+    const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => recentlyPlayed.some(r => r.itemId === item.id)).length > 0);
 
-    if (combinedLoading && mediaItems.length === 0 && recentlyPlayed.length > 0) { 
+    if (combinedLoading && recentMediaItems.length === 0 && recentlyPlayed.length > 0) { 
       setProgressValue(10); 
       interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -65,11 +68,12 @@ export default function RecentlyPlayedPage() {
         clearInterval(interval);
       }
     };
-  }, [storeIsLoading, epgLoading, epgData, isClient, mediaItems, recentlyPlayed]);
+  }, [isClient, storeIsLoading, epgLoading, epgData, recentlyPlayed, mediaItems]); // Added mediaItems to re-evaluate when they load
 
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
+      setCurrentPage(1); // Reset to first page on new search
     }, 300); 
 
     return () => {
@@ -97,6 +101,11 @@ export default function RecentlyPlayedPage() {
     );
   }, [recentMediaItems, debouncedSearchTerm]);
 
+  const totalPages = Math.ceil(filteredRecentItems.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const currentItemsToDisplay = filteredRecentItems.slice(startIndex, endIndex);
+
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (!tvgId || !epgData[tvgId] || epgLoading) return null;
     const now = new Date();
@@ -107,9 +116,9 @@ export default function RecentlyPlayedPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold mb-2 flex items-center"><History className="mr-3 h-8 w-8 text-primary" /> Recentemente Reproduzido</h1>
-        {isClient && (storeIsLoading || epgLoading) && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => recentlyPlayed.some(r => r.itemId === item.id)).length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
-          {Array.from({ length: recentlyPlayed.length > 0 ? Math.min(recentlyPlayed.length, 10) : 5 }).map((_, index) => (
+          {Array.from({ length: recentlyPlayed.length > 0 ? Math.min(recentlyPlayed.length, ITEMS_PER_PAGE) : 5 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
               <Skeleton className="h-[300px] w-full rounded-xl" />
               <div className="space-y-2">
@@ -148,7 +157,7 @@ export default function RecentlyPlayedPage() {
     );
   }
   
-  if (mediaItems.length > 0 && recentMediaItems.length === 0 && recentlyPlayed.length > 0 && !storeIsLoading) {
+  if (mediaItems.length > 0 && recentMediaItems.length === 0 && recentlyPlayed.length > 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <History className="w-24 h-24 text-muted-foreground mb-6" />
@@ -178,7 +187,7 @@ export default function RecentlyPlayedPage() {
         )}
       </div>
 
-      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0)) && recentMediaItems.length > 0 && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => recentlyPlayed.some(r => r.itemId === item.id)).length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
       
       {filteredRecentItems.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
@@ -188,9 +197,9 @@ export default function RecentlyPlayedPage() {
         </div>
       )}
 
-      {filteredRecentItems.length > 0 && (
+      {currentItemsToDisplay.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
-            {filteredRecentItems.map(item => {
+            {currentItemsToDisplay.map(item => {
               const nowPlayingProgram = item.type === 'channel' ? getNowPlaying(item.tvgId) : null;
               return (
                 <MediaCard 
@@ -202,7 +211,28 @@ export default function RecentlyPlayedPage() {
             })}
         </div>
       )}
+
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center space-x-4 mt-8">
+          <Button
+            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            variant="outline"
+          >
+            Anterior
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Página {currentPage} de {totalPages}
+          </span>
+          <Button
+            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+            disabled={currentPage === totalPages}
+            variant="outline"
+          >
+            Próxima
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
-
