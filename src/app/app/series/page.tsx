@@ -20,29 +20,6 @@ import { processGroupName } from '@/lib/group-name-utils';
 const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
-// Helper adapted from MediaCard to count logical sources for filtering
-const hasMultipleLogicalSources = (currentItem: MediaItem, allItems: MediaItem[], parentalControlEnabled: boolean): boolean => {
-  if (!currentItem) return false;
-  const visibleItems = applyParentalFilter(allItems, parentalControlEnabled);
-
-  let potentialSources: MediaItem[];
-  if (currentItem.tvgId) { // Though less common for movies/series, check just in case
-    potentialSources = visibleItems.filter(
-      (item) => item.tvgId === currentItem.tvgId && item.type === currentItem.type
-    );
-  } else {
-    // For VOD, group by normalized title and type
-    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title, currentItem.type);
-    potentialSources = visibleItems.filter(
-      (item) => {
-        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title, item.type);
-        return otherItemTitleNormalizedKey === currentItemTitleNormalizedKey && item.type === currentItem.type;
-      }
-    );
-  }
-  return potentialSources.length > 1;
-};
-
 export default function SeriesPage() {
   const [isClient, setIsClient] = useState(false);
   const {
@@ -72,8 +49,7 @@ export default function SeriesPage() {
   useEffect(() => {
     if(!isClient) return;
     let interval: NodeJS.Timeout | undefined;
-
-    if (storeIsLoading) { // Show progress if any loading is happening
+    if (storeIsLoading) { 
         setProgressValue(prev => (prev === 100 ? 10 : prev));
         interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -97,24 +73,41 @@ export default function SeriesPage() {
     };
   }, [searchTerm]);
 
-  const allSeries = useMemo(() => {
+  const seriesParentalFiltered = useMemo(() => {
     let series = mediaItems.filter(item => item.type === 'series');
-    series = applyParentalFilter(series, parentalControlEnabled);
+    return applyParentalFilter(series, parentalControlEnabled);
+  }, [mediaItems, parentalControlEnabled]);
+
+  const vodSourceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    seriesParentalFiltered.forEach(s => {
+        const { normalizedKey } = processGroupName(s.title, 'series');
+        counts.set(normalizedKey, (counts.get(normalizedKey) || 0) + 1);
+    });
+    return counts;
+  }, [seriesParentalFiltered]);
+
+  const allSeries = useMemo(() => {
+    let seriesToDisplay = [...seriesParentalFiltered];
 
     if (showOnlyMultiSource) {
-      series = series.filter(s => hasMultipleLogicalSources(s, mediaItems, parentalControlEnabled));
+      seriesToDisplay = seriesToDisplay.filter(s => {
+        const { normalizedKey } = processGroupName(s.title, 'series');
+        return (vodSourceCounts.get(normalizedKey) || 0) > 1;
+      });
     }
 
     switch (sortOrder) {
       case 'title-asc':
-        series = [...series].sort((a, b) => a.title.localeCompare(b.title));
+        seriesToDisplay = seriesToDisplay.sort((a, b) => a.title.localeCompare(b.title));
         break;
       case 'title-desc':
-        series = [...series].sort((a, b) => b.title.localeCompare(a.title));
+        seriesToDisplay = seriesToDisplay.sort((a, b) => b.title.localeCompare(a.title));
         break;
     }
-    return series;
-  }, [mediaItems, sortOrder, parentalControlEnabled, showOnlyMultiSource]);
+    return seriesToDisplay;
+  }, [seriesParentalFiltered, sortOrder, showOnlyMultiSource, vodSourceCounts]);
+
 
   const filteredSeries = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -151,7 +144,7 @@ export default function SeriesPage() {
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Clapperboard className="mr-3 h-8 w-8 text-primary" /> Séries</h1>
         </div>
-        <Progress value={progressValue} className="w-full mb-8 h-2" />
+        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full my-4 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
              <div key={index} className="flex flex-col space-y-3">
@@ -198,10 +191,10 @@ export default function SeriesPage() {
   if (mediaItems.length > 0 && allSeries.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
-        <Clapperboard className="w-24 h-24 text-muted-foreground mb-6" />
+        <ListFilter className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Nenhuma Série Encontrada</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          Parece que não há séries nas suas playlists atuais, ou estão ocultas pelo controle parental ou pelo filtro de múltiplas fontes. Verifique suas fontes ou configurações de filtro.
+          Não há séries para exibir com os filtros atuais. Verifique suas fontes, filtro de múltiplas fontes ou configurações de controle parental.
         </p>
         <div className="flex gap-4">
             <Link href="/app/settings" passHref>
@@ -258,7 +251,7 @@ export default function SeriesPage() {
         </div>
       )}
 
-      {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && storeIsLoading && <Progress value={progressValue} className="w-full my-4 h-2" />}
 
       {filteredSeries.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">

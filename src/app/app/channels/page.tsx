@@ -20,19 +20,6 @@ import { processGroupName } from '@/lib/group-name-utils';
 const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
-// Helper adapted from MediaCard to count logical sources for filtering
-const hasMultipleLogicalSources = (currentItem: MediaItem, allItems: MediaItem[], parentalControlEnabled: boolean): boolean => {
-  if (!currentItem || currentItem.type !== 'channel') return false; // Only for channels for this page's filter
-  const visibleItems = applyParentalFilter(allItems, parentalControlEnabled);
-
-  // For channels, group by baseName to find variants (different qualities/sources of the same channel)
-  const potentialSources = visibleItems.filter(
-    (item) => item.type === 'channel' && item.baseName === currentItem.baseName
-  );
-  return potentialSources.length > 1;
-};
-
-
 export default function ChannelsPage() {
   const [isClient, setIsClient] = useState(false);
   const {
@@ -68,7 +55,6 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     if (!isClient) return;
-
     let interval: NodeJS.Timeout | undefined;
     const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && mediaItems.filter(item => item.type === 'channel').length > 0);
 
@@ -81,7 +67,6 @@ export default function ChannelsPage() {
         if (interval) clearInterval(interval);
         setProgressValue(100);
     }
-
     return () => {
         if (interval) clearInterval(interval);
     };
@@ -104,50 +89,50 @@ export default function ChannelsPage() {
     return channels;
   }, [mediaItems, parentalControlEnabled]);
 
+  // Pre-compute a map of baseName to all its variants from raw channels
+  const logicalChannelVariantsMap = useMemo(() => {
+    const map = new Map<string, MediaItem[]>();
+    allChannelsRaw.forEach(channel => {
+        const key = channel.baseName || channel.title;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(channel);
+    });
+    // Sort variants within each group (e.g., by quality, then playlist name)
+    map.forEach(variants => {
+        variants.sort((a, b) => 
+            (a.qualityTag || 'ZZZ').localeCompare(b.qualityTag || 'ZZZ') || // Items without quality tag last
+            (a.originatingPlaylistName || '').localeCompare(b.originatingPlaylistName || '')
+        );
+    });
+    return map;
+  }, [allChannelsRaw]);
+
+
   const allLogicalChannels = useMemo(() => {
-    let channelsToProcess = [...allChannelsRaw];
+    // Get representative channels (first variant of each group)
+    let representativeChannels = Array.from(logicalChannelVariantsMap.values())
+        .map(variants => variants[0])
+        .filter((channel): channel is MediaItem => !!channel); // Ensure no undefined if a group was empty
 
     if (showOnlyMultiSource) {
-      // Filter logical channels: keep only those where the representative item (first variant) has multiple sources.
-      const logicalSourceMap = new Map<string, MediaItem[]>();
-      channelsToProcess.forEach(channel => {
-        const key = channel.baseName || channel.title;
-        if (!logicalSourceMap.has(key)) logicalSourceMap.set(key, []);
-        logicalSourceMap.get(key)!.push(channel);
-      });
-      
-      channelsToProcess = Array.from(logicalSourceMap.values())
-        .filter(variants => variants.length > 1)
-        .flatMap(variants => variants); // Flatten back, or decide on representative
+        representativeChannels = representativeChannels.filter(repChannel => {
+            const variants = logicalChannelVariantsMap.get(repChannel.baseName || repChannel.title);
+            return variants && variants.length > 1;
+        });
     }
-    
-    // Create a map of baseName to its variants
-    const logicalChannelMap = new Map<string, MediaItem[]>();
-    channelsToProcess.forEach(channel => {
-      const key = channel.baseName || channel.title; // Use baseName as the key for logical channels
-      if (!logicalChannelMap.has(key)) {
-        logicalChannelMap.set(key, []);
-      }
-      logicalChannelMap.get(key)!.push(channel);
-    });
 
-    // Sort variants within each logical channel (e.g., by quality or playlist name) - optional
-    logicalChannelMap.forEach(variants => {
-      variants.sort((a, b) => (a.qualityTag || '').localeCompare(b.qualityTag || '') || (a.originatingPlaylistName || '').localeCompare(b.originatingPlaylistName || ''));
-    });
-    
-    let representativeChannels = Array.from(logicalChannelMap.values()).map(variants => variants[0]); // Get the first variant as representative
-
+    // Apply sorting
     switch (sortOrder) {
       case 'title-asc':
-        representativeChannels = representativeChannels.sort((a, b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
+        representativeChannels.sort((a, b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
         break;
       case 'title-desc':
-        representativeChannels = representativeChannels.sort((a, b) => (b.baseName || b.title).localeCompare(a.baseName || a.title));
+        representativeChannels.sort((a, b) => (b.baseName || b.title).localeCompare(a.baseName || a.title));
         break;
+      // Default: no specific sort here, relies on original map order or can be playlist order
     }
     return representativeChannels;
-  }, [allChannelsRaw, sortOrder, showOnlyMultiSource]);
+  }, [logicalChannelVariantsMap, sortOrder, showOnlyMultiSource]);
 
 
   const filteredLogicalChannels = useMemo(() => {
@@ -164,11 +149,6 @@ export default function ChannelsPage() {
     const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
     
     filteredLogicalChannels.forEach(representativeChannel => {
-      // Find all variants for this representative channel from the *original unfiltered list*
-      const allVariantsForThisLogicalChannel = allChannelsRaw.filter(
-        c => c.baseName === representativeChannel.baseName
-      );
-
       const rawGroupName = representativeChannel.groupTitle || 'Uncategorized';
       const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName, 'channel');
 
@@ -176,13 +156,11 @@ export default function ChannelsPage() {
         groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
       }
       // Add the representative channel to the items list of the group
-      // We will pass all variants to the MediaCard later
-      if (!groupsMap[normalizedKey].items.some(item => item.baseName === representativeChannel.baseName)) {
-         groupsMap[normalizedKey].items.push(representativeChannel); // Add representative item
+      if (!groupsMap[normalizedKey].items.some(item => (item.baseName || item.title) === (representativeChannel.baseName || representativeChannel.title))) {
+         groupsMap[normalizedKey].items.push(representativeChannel);
       }
     });
     
-    // Sort items within each group by baseName for consistent display
     Object.values(groupsMap).forEach(group => {
         group.items.sort((a,b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
     });
@@ -190,7 +168,7 @@ export default function ChannelsPage() {
     return Object.entries(groupsMap)
       .map(([key, value]) => ({ ...value, normalizedKey: key }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [filteredLogicalChannels, allChannelsRaw]);
+  }, [filteredLogicalChannels]);
 
   const getNowPlaying = (tvgId?: string): EpgProgram | null => {
     if (!tvgId || !epgData[tvgId] || epgLoading) return null;
@@ -205,7 +183,7 @@ export default function ChannelsPage() {
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Tv2 className="mr-3 h-8 w-8 text-primary" /> Canais</h1>
         </div>
-        {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+        {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -252,10 +230,10 @@ export default function ChannelsPage() {
   if (mediaItems.length > 0 && allLogicalChannels.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
-        <Tv2 className="w-24 h-24 text-muted-foreground mb-6" />
+        <ListFilter className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Nenhum Canal Encontrado</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          Parece que não há canais de TV nas suas playlists atuais, ou estão ocultos pelo controle parental ou pelo filtro de múltiplas fontes. Verifique suas fontes ou configurações de filtro.
+          Não há canais de TV para exibir com os filtros atuais. Verifique suas fontes, filtro de múltiplas fontes ou configurações de controle parental.
         </p>
         <div className="flex gap-4">
           <Link href="/app/settings" passHref>
@@ -312,7 +290,7 @@ export default function ChannelsPage() {
         </div>
       )}
 
-      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && (storeIsLoading || (epgLoading && Object.keys(epgData).length === 0 && allChannelsRaw.length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
 
       {filteredLogicalChannels.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
@@ -326,9 +304,8 @@ export default function ChannelsPage() {
         <section key={group.normalizedKey}>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold hover:underline">
-              {/* TODO: Link para página de grupo aqui precisa ser ajustado para lógica de canais lógicos */}
               <Link href={`/app/group/channel/${encodeURIComponent(group.displayName)}`}>
-                {group.displayName} ({group.items.length}) {/* This count is now for logical channels */}
+                {group.displayName} ({group.items.length})
               </Link>
             </h2>
             {group.items.length > ITEMS_PER_GROUP_PREVIEW && (
@@ -339,16 +316,13 @@ export default function ChannelsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
             {group.items.slice(0, ITEMS_PER_GROUP_PREVIEW).map(representativeItem => {
-              // Find all variants for this representative item from the original raw list
-              const allVariants = allChannelsRaw.filter(
-                c => c.baseName === representativeItem.baseName
-              );
-              const nowPlayingProgram = getNowPlaying(representativeItem.tvgId); // EPG for representative or first variant
+              const allVariantsForThisLogicalChannel = logicalChannelVariantsMap.get(representativeItem.baseName || representativeItem.title) || [representativeItem];
+              const nowPlayingProgram = getNowPlaying(representativeItem.tvgId);
               return (
                 <MediaCard
-                  key={`${representativeItem.baseName}-${representativeItem.id}`}
-                  item={representativeItem} // Pass the representative item
-                  allChannelVariants={allVariants} // Pass all its variants
+                  key={`${representativeItem.baseName || representativeItem.title}-${representativeItem.id}`}
+                  item={representativeItem} 
+                  allChannelVariants={allVariantsForThisLogicalChannel} 
                   nowPlaying={nowPlayingProgram ? nowPlayingProgram.title : undefined}
                 />
               );

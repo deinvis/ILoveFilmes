@@ -20,29 +20,6 @@ import { processGroupName } from '@/lib/group-name-utils';
 const ITEMS_PER_GROUP_PREVIEW = 4;
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
-// Helper adapted from MediaCard to count logical sources for filtering
-const hasMultipleLogicalSources = (currentItem: MediaItem, allItems: MediaItem[], parentalControlEnabled: boolean): boolean => {
-  if (!currentItem) return false;
-  const visibleItems = applyParentalFilter(allItems, parentalControlEnabled);
-
-  let potentialSources: MediaItem[];
-  if (currentItem.tvgId) { // Though less common for movies/series, check just in case
-    potentialSources = visibleItems.filter(
-      (item) => item.tvgId === currentItem.tvgId && item.type === currentItem.type
-    );
-  } else {
-    // For VOD, group by normalized title and type
-    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title, currentItem.type);
-    potentialSources = visibleItems.filter(
-      (item) => {
-        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title, item.type);
-        return otherItemTitleNormalizedKey === currentItemTitleNormalizedKey && item.type === currentItem.type;
-      }
-    );
-  }
-  return potentialSources.length > 1;
-};
-
 export default function MoviesPage() {
   const [isClient, setIsClient] = useState(false);
   const {
@@ -71,10 +48,8 @@ export default function MoviesPage() {
 
  useEffect(() => {
     if (!isClient) return;
-
     let interval: NodeJS.Timeout | undefined;
-
-    if (storeIsLoading) { // Show progress if any loading is happening
+    if (storeIsLoading) {
         setProgressValue(prev => (prev === 100 ? 10 : prev));
         interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -99,24 +74,42 @@ export default function MoviesPage() {
     };
   }, [searchTerm]);
 
-  const allMovies = useMemo(() => {
+  const moviesParentalFiltered = useMemo(() => {
     let movies = mediaItems.filter(item => item.type === 'movie');
-    movies = applyParentalFilter(movies, parentalControlEnabled);
+    return applyParentalFilter(movies, parentalControlEnabled);
+  }, [mediaItems, parentalControlEnabled]);
+
+  const vodSourceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    moviesParentalFiltered.forEach(movie => {
+        // Use a consistent key for grouping VOD items by title
+        const { normalizedKey } = processGroupName(movie.title, 'movie'); 
+        counts.set(normalizedKey, (counts.get(normalizedKey) || 0) + 1);
+    });
+    return counts;
+  }, [moviesParentalFiltered]);
+
+  const allMovies = useMemo(() => {
+    let moviesToDisplay = [...moviesParentalFiltered];
 
     if (showOnlyMultiSource) {
-      movies = movies.filter(movie => hasMultipleLogicalSources(movie, mediaItems, parentalControlEnabled));
+      moviesToDisplay = moviesToDisplay.filter(movie => {
+        const { normalizedKey } = processGroupName(movie.title, 'movie');
+        return (vodSourceCounts.get(normalizedKey) || 0) > 1;
+      });
     }
 
     switch (sortOrder) {
       case 'title-asc':
-        movies = [...movies].sort((a, b) => a.title.localeCompare(b.title));
+        moviesToDisplay = moviesToDisplay.sort((a, b) => a.title.localeCompare(b.title));
         break;
       case 'title-desc':
-        movies = [...movies].sort((a, b) => b.title.localeCompare(a.title));
+        moviesToDisplay = moviesToDisplay.sort((a, b) => b.title.localeCompare(a.title));
         break;
     }
-    return movies;
-  }, [mediaItems, sortOrder, parentalControlEnabled, showOnlyMultiSource]);
+    return moviesToDisplay;
+  }, [moviesParentalFiltered, sortOrder, showOnlyMultiSource, vodSourceCounts]);
+
 
   const filteredMovies = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -153,7 +146,7 @@ export default function MoviesPage() {
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Film className="mr-3 h-8 w-8 text-primary" /> Filmes</h1>
         </div>
-        <Progress value={progressValue} className="w-full mb-8 h-2" />
+        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full my-4 h-2" />}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
              <div key={index} className="flex flex-col space-y-3">
@@ -200,10 +193,10 @@ export default function MoviesPage() {
   if (mediaItems.length > 0 && allMovies.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
-        <Film className="w-24 h-24 text-muted-foreground mb-6" />
+        <ListFilter className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Nenhum Filme Encontrado</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          Parece que não há filmes nas suas playlists atuais, ou estão ocultos pelo controle parental ou pelo filtro de múltiplas fontes. Verifique suas fontes ou configurações de filtro.
+          Não há filmes para exibir com os filtros atuais. Verifique suas fontes, filtro de múltiplas fontes ou configurações de controle parental.
         </p>
         <div className="flex gap-4">
             <Link href="/app/settings" passHref>
@@ -260,7 +253,7 @@ export default function MoviesPage() {
         </div>
       )}
 
-      {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-4 h-2" />}
+      {isClient && storeIsLoading && <Progress value={progressValue} className="w-full my-4 h-2" />}
 
       {filteredMovies.length === 0 && debouncedSearchTerm && !storeIsLoading && (
         <div className="text-center py-16 bg-card rounded-lg shadow-md">
