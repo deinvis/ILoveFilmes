@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { format, parseISO } from 'date-fns';
 import type { PlaylistType, PlaylistItem } from '@/types';
+import { cn } from "@/lib/utils"; // Added import for cn
 
 export function PlaylistManager() {
   const [playlistInputType, setPlaylistInputType] = useState<PlaylistType>('m3u');
