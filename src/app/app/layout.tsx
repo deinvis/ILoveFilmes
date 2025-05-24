@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, Fragment } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaItem, MediaType } from '@/types';
 import { applyParentalFilter } from '@/lib/parental-filter';
@@ -85,9 +85,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
 
     filteredMediaItemsForSidebar.forEach(item => {
-      if (item.type && uniqueNormalizedGroups[item.type]) { 
-        const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        // Pass item.type to processGroupName
+      if (item.type && uniqueNormalizedGroups[item.type]) {
+        const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'UNCATEGORIZED';
         const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup, item.type);
 
 
@@ -111,17 +110,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setOpenSubmenus(prev => ({ ...prev, [currentMainCategory.value]: true }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]); 
+  }, [pathname]);
 
 
   const toggleSubmenu = (itemValue: string) => {
     setOpenSubmenus(prev => ({ ...prev, [itemValue]: !prev[itemValue] }));
   };
 
-  const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, closeMobileSheet?: () => void }) => {
-    const handleLinkClickAndCloseSheet = () => {
-      if (isMobile && closeMobileSheet) {
-        closeMobileSheet();
+  const NavLinks = ({ isMobile = false }: { isMobile?: boolean }) => {
+    const closeMobileSheet = () => {
+      if (isMobile) {
+        setIsMobileSheetOpen(false);
       }
     }
 
@@ -133,12 +132,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
 
           const handleMainItemClick = () => {
+            // For items that are just links (no sub-items, or already on their page and submenu closed)
+            // or if the submenu is already open and we are clicking the main link again.
             if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
-              handleLinkClickAndCloseSheet();
+              closeMobileSheet();
             }
+            // If it has sub-items and we are not on its main page, clicking its link navigates but
+            // doesn't toggle the submenu (that's handled by the chevron or the button's direct onClick for toggling)
+            // unless we are on the item's page and the submenu is closed.
           };
-          
+
           const mainItemIsJustLink = !hasSubItems || (pathname === item.href && !openSubmenus[item.value]);
+          const iconClassName = cn("h-5 w-5 shrink-0", !mainItemIsJustLink && "mr-2");
+          const linkClassName = cn("flex items-center", !mainItemIsJustLink && "flex-grow");
+
 
           return (
             <React.Fragment key={item.value}>
@@ -149,7 +156,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     "w-full",
                     !hasSubItems ? "justify-start" : "justify-between"
                   )}
-                  onClick={() => { 
+                  onClick={() => {
                     if (hasSubItems) {
                       toggleSubmenu(item.value);
                     }
@@ -161,11 +168,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                      <Link
                       href={item.href}
                       passHref
-                      legacyBehavior={false} 
-                      onClick={handleMainItemClick}
-                      className="flex items-center flex-grow" 
+                      legacyBehavior={false}
+                      onClick={() => {
+                        handleMainItemClick(); // Handles navigation part
+                        closeMobileSheet(); // Explicitly close sheet on direct link click
+                      }}
+                      className={linkClassName}
                     >
-                      <item.icon className="h-5 w-5 mr-2 shrink-0" />
+                      <item.icon className={iconClassName} />
                       <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                     </Link>
                   ) : (
@@ -174,10 +184,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         href={item.href}
                         passHref
                         legacyBehavior={false}
-                        className="flex items-center flex-grow"
-                        onClick={handleMainItemClick}
+                        className={linkClassName}
+                        onClick={handleMainItemClick} // Handles navigation part
                       >
-                        <item.icon className="h-5 w-5 mr-2 shrink-0" />
+                        <item.icon className={iconClassName} />
                         <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                       </Link>
                       {hasSubItems && (
@@ -186,7 +196,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                             "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
                             openSubmenus[item.value] ? "rotate-180" : ""
                             )}
-                            onClick={(e) => { 
+                            onClick={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 toggleSubmenu(item.value);
@@ -206,7 +216,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           <SidebarMenuButton
                             isActive={pathname === subItem.href}
                             className="w-full justify-start h-auto py-1.5 text-xs font-normal"
-                            onClick={handleLinkClickAndCloseSheet}
+                            onClick={closeMobileSheet}
                             tooltip={subItem.label}
                           >
                             <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
@@ -226,7 +236,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarMenuButton
                 isActive={pathname === item.href}
                 className="w-full justify-start"
-                onClick={handleLinkClickAndCloseSheet}
+                onClick={closeMobileSheet}
                 tooltip={item.label}
               >
                 <item.icon className="h-5 w-5 mr-2 shrink-0" />
@@ -264,7 +274,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarHeader>
           <SidebarContent className="p-2 flex-grow overflow-y-auto">
             <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
-              <NavLinks isMobile={false} closeMobileSheet={() => setIsMobileSheetOpen(false)} />
+              <NavLinks isMobile={false} />
             </ClientSideOnlyRenderer>
           </SidebarContent>
           <SidebarFooter className="p-4 mt-auto group-data-[collapsible=icon]:hidden">
@@ -293,7 +303,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </MobileSheetHeader>
                 <nav className="grid gap-1 text-lg font-medium p-2 flex-grow overflow-y-auto">
                   <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
-                    <NavLinks isMobile closeMobileSheet={() => setIsMobileSheetOpen(false)} />
+                    <NavLinks isMobile />
                   </ClientSideOnlyRenderer>
                 </nav>
                  <div className="mt-auto p-4 border-t">
@@ -314,3 +324,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+
+
+    
