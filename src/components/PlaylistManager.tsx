@@ -21,6 +21,17 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { format, parseISO } from 'date-fns';
 import type { PlaylistType, PlaylistItem } from '@/types';
 import { cn } from "@/lib/utils";
@@ -45,11 +56,10 @@ export function PlaylistManager() {
   const [editXcDns, setEditXcDns] = useState('');
   const [editXcUsername, setEditXcUsername] = useState('');
   const [editXcPassword, setEditXcPassword] = useState('');
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
 
   useEffect(() => {
-    // Only fetch if client-side and no playlists initially, and not already loading
-    // This avoids fetching on every mount if playlists are already loaded/cached by Zustand
     if (typeof window !== 'undefined' && playlists.length === 0 && !isLoading) {
       fetchAndParsePlaylists();
     }
@@ -58,7 +68,7 @@ export function PlaylistManager() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       setSelectedFile(event.target.files[0]);
-      setNewPlaylistUrl(''); // Clear URL if file is selected
+      setNewPlaylistUrl(''); 
     }
   };
 
@@ -72,10 +82,10 @@ export function PlaylistManager() {
           const fileContent = e.target?.result as string;
           if (fileContent) {
             await addPlaylistFromFileContent(fileContent, newPlaylistName.trim() || selectedFile.name);
-             const currentError = usePlaylistStore.getState().error; // Get fresh error state
+             const currentError = usePlaylistStore.getState().error;
              if (currentError && (currentError.includes(newPlaylistName.trim() || selectedFile.name) || currentError.includes("Falha ao processar playlist de arquivo"))) {
                 toast({ title: "Erro ao adicionar playlist do arquivo", description: currentError, variant: "destructive" });
-             } else if (!currentError) { // Only show success if no error was set by addPlaylistFromFileContent
+             } else if (!currentError) { 
                 toast({ title: "Sucesso", description: `Playlist do arquivo "${newPlaylistName.trim() || selectedFile.name}" agendada para adição.` });
                 setSelectedFile(null);
                 if (fileInputRef.current) fileInputRef.current.value = '';
@@ -89,7 +99,7 @@ export function PlaylistManager() {
           toast({ title: "Erro", description: "Falha ao ler o arquivo.", variant: "destructive" });
         };
         reader.readAsText(selectedFile);
-        return; // Processing will happen in onload
+        return; 
       } else if (!newPlaylistUrl.trim()) {
         toast({ title: "Erro", description: "URL da playlist ou arquivo M3U deve ser fornecido.", variant: "destructive" });
         return;
@@ -105,8 +115,8 @@ export function PlaylistManager() {
         return;
       }
       try {
-        const parsedDns = new URL(newXcDns); // Basic validation for DNS format
-        if(!['http:', 'https:',].includes(parsedDns.protocol)){ // Check for http or https
+        const parsedDns = new URL(newXcDns); 
+        if(!['http:', 'https:',].includes(parsedDns.protocol)){
           toast({ title: "Erro", description: "DNS inválido. Deve começar com http:// ou https://", variant: "destructive" });
           return;
         }
@@ -119,22 +129,20 @@ export function PlaylistManager() {
         xcDns: newXcDns,
         xcUsername: newXcUsername,
         xcPassword: newXcPassword,
-        name: newPlaylistName.trim() || newXcDns, // Default name to DNS if not provided
-        source: 'url' // XC is always URL based for initial setup
+        name: newPlaylistName.trim() || newXcDns, 
+        source: 'url' 
       });
     }
     
-    // Check error state AFTER the async addPlaylist call has completed
     const currentError = usePlaylistStore.getState().error; 
     const lastAddedPlaylistName = newPlaylistName.trim() || (playlistInputType === 'm3u' ? newPlaylistUrl : newXcDns);
 
-    // Check if the error message relates to the playlist just attempted
     if (currentError && (currentError.includes(newPlaylistUrl) || currentError.includes(newXcDns) || currentError.includes(lastAddedPlaylistName))) {
-       playlistNameError = true; // This helps to avoid clearing fields if specific error
+       playlistNameError = true; 
        toast({ title: "Erro ao adicionar playlist", description: currentError, variant: "destructive" });
     }
     
-    if (!playlistNameError && !selectedFile) { // Don't reset if file was processed, it resets itself
+    if (!playlistNameError && !selectedFile) { 
       toast({ title: "Sucesso", description: `Playlist ${lastAddedPlaylistName} agendada para adição.` });
       setNewPlaylistUrl('');
       setNewPlaylistName('');
@@ -147,6 +155,9 @@ export function PlaylistManager() {
   const handleRemovePlaylist = (id: string) => {
     removePlaylist(id);
     toast({ title: "Playlist Removida", description: `Playlist foi removida e os itens de mídia serão atualizados.` });
+    setIsEditDialogOpen(false); // Close edit dialog if open
+    setIsDeleteConfirmOpen(false); // Close delete confirmation dialog
+    setEditingPlaylist(null);
   };
 
   const formatExpiryDate = (isoDateString?: string) => {
@@ -158,13 +169,12 @@ export function PlaylistManager() {
     setEditingPlaylist(playlist);
     setEditPlaylistName(playlist.name || '');
     if (playlist.type === 'm3u') {
-      setEditPlaylistUrl(playlist.url || ''); // File-based M3Us won't have URLs here for editing.
-      // Clear XC fields for M3U edit dialog
+      setEditPlaylistUrl(playlist.url || ''); 
       setEditXcDns('');
       setEditXcUsername('');
       setEditXcPassword('');
     } else if (playlist.type === 'xc') {
-      setEditPlaylistUrl(''); // Clear M3U URL field for XC edit dialog
+      setEditPlaylistUrl(''); 
       setEditXcDns(playlist.xcDns || '');
       setEditXcUsername(playlist.xcUsername || '');
       setEditXcPassword(playlist.xcPassword || '');
@@ -179,8 +189,6 @@ export function PlaylistManager() {
     let validationError = false;
 
     if (editingPlaylist.type === 'm3u') {
-      // For M3U, only URL (if source is 'url') and name are editable.
-      // If source is 'file', only name is editable. URL is not present/editable.
       if (editingPlaylist.source === 'url' && !editPlaylistUrl.trim()) {
         toast({ title: "Erro na Edição", description: "URL da playlist M3U não pode ser vazia.", variant: "destructive" });
         validationError = true;
@@ -190,7 +198,6 @@ export function PlaylistManager() {
           validationError = true;
         }
       }
-      // For file-based M3U, only name can be edited here. URL/content is not editable via this dialog.
     } else if (editingPlaylist.type === 'xc') {
       if (!editXcDns.trim() || !editXcUsername.trim() || !editXcPassword.trim()) {
         toast({ title: "Erro na Edição", description: "DNS, Nome de Usuário e Senha são obrigatórios para Xtream Codes.", variant: "destructive" });
@@ -216,11 +223,10 @@ export function PlaylistManager() {
     if (validationError) return;
 
     await updatePlaylist(editingPlaylist.id, updates);
-    const currentError = usePlaylistStore.getState().error; // Get fresh error state
-    // Check if the error is related to the updated playlist
+    const currentError = usePlaylistStore.getState().error; 
     if (currentError && (currentError.includes(editingPlaylist.id) || (updates.url && currentError.includes(updates.url)) || (updates.xcDns && currentError.includes(updates.xcDns)))) {
         toast({ title: "Erro ao atualizar playlist", description: currentError, variant: "destructive" });
-    } else if (!currentError) { // Only show success if no error was set by updatePlaylist
+    } else if (!currentError) { 
         toast({ title: "Playlist Atualizada", description: `Playlist "${editingPlaylist.name || editingPlaylist.id}" atualizada com sucesso.` });
         setIsEditDialogOpen(false);
         setEditingPlaylist(null);
@@ -238,7 +244,7 @@ export function PlaylistManager() {
           <CardDescription>Adicione ou remova suas fontes de playlist (URL M3U, Xtream Codes ou arquivo M3U).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {error && !isLoading && ( // Display general error if not loading, but specific errors are toasted
+          {error && !isLoading && ( 
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Erro Geral</AlertTitle>
@@ -299,7 +305,7 @@ export function PlaylistManager() {
                   <Label htmlFor="xc-dns" className="mb-1.5 block text-sm font-medium">DNS do Servidor* (com http/https)</Label>
                   <Input
                     id="xc-dns"
-                    type="url" // type="url" for basic validation
+                    type="url" 
                     placeholder="Ex: http://myportal.com:8080"
                     value={newXcDns}
                     onChange={(e) => setNewXcDns(e.target.value)}
@@ -361,7 +367,7 @@ export function PlaylistManager() {
                     key={playlist.id}
                     className="flex items-center justify-between p-3 bg-card hover:bg-muted/50 rounded-md transition-colors"
                   >
-                    <div className="truncate flex-grow mr-2 min-w-0"> {/* Added min-w-0 here */}
+                    <div className="truncate flex-grow mr-2 min-w-0"> 
                       <p className="font-medium truncate text-sm" title={playlist.name || (playlist.type === 'm3u' ? (playlist.url || 'Arquivo M3U') : playlist.xcDns)}>
                         {playlist.name || (playlist.type === 'm3u' ? (playlist.url ? 'Playlist M3U Sem Nome' : `Arquivo: ${playlist.url || 'Desconhecido'}`) : 'Playlist XC Sem Nome')}
                       </p>
@@ -379,21 +385,13 @@ export function PlaylistManager() {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleEditClick(playlist)}
-                        disabled={isLoading || playlist.source === 'file'} // Disable edit for file-based for now
-                        title={playlist.source === 'file' ? "Edição de nome para arquivos via 'Nome da Playlist' ao adicionar" : `Editar playlist ${playlist.name || '...'}`}
+                        disabled={isLoading || (playlist.type === 'm3u' && playlist.source === 'file')} 
+                        title={playlist.type === 'm3u' && playlist.source === 'file' ? "Apenas nome de playlist de arquivo é editável. Para mudar conteúdo, re-uploade." : `Editar playlist ${playlist.name || '...'}`}
                         className="mr-1"
                       >
-                        <Pencil className={cn("h-4 w-4 text-blue-500 hover:text-blue-400", playlist.source === 'file' && "opacity-50 cursor-not-allowed")} />
+                        <Pencil className={cn("h-4 w-4 text-blue-500 hover:text-blue-400", playlist.type === 'm3u' && playlist.source === 'file' && !playlist.name && "opacity-50 cursor-not-allowed" )} />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemovePlaylist(playlist.id)}
-                        disabled={isLoading}
-                        aria-label={`Remover playlist ${playlist.name || (playlist.type === 'm3u' ? (playlist.url || 'Arquivo M3U') : playlist.xcDns)}`}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive hover:text-red-400" />
-                      </Button>
+                       {/* Botão de apagar removido daqui */}
                     </div>
                   </li>
                 ))}
@@ -409,12 +407,15 @@ export function PlaylistManager() {
       </Card>
 
       {editingPlaylist && (
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <Dialog open={isEditDialogOpen} onOpenChange={(isOpen) => {
+          setIsEditDialogOpen(isOpen);
+          if (!isOpen) setEditingPlaylist(null); // Reset editingPlaylist when dialog closes
+        }}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Editar Playlist: {editingPlaylist.name || (editingPlaylist.type === 'm3u' ? editingPlaylist.url : editingPlaylist.xcDns)}</DialogTitle>
+              <DialogTitle>Editar Playlist: {editingPlaylist.name || (editingPlaylist.type === 'm3u' ? (editingPlaylist.url || `Arquivo ${editingPlaylist.id.substring(0,6)}...`) : editingPlaylist.xcDns)}</DialogTitle>
               <DialogDescription>
-                Modifique os detalhes da sua playlist {editingPlaylist.type === 'm3u' ? 'M3U' : 'Xtream Codes'}. O tipo da playlist e a fonte (URL/Arquivo) não podem ser alterados.
+                Modifique os detalhes da sua playlist {editingPlaylist.type === 'm3u' ? (editingPlaylist.source === 'file' ? 'baseada em arquivo' : 'M3U') : 'Xtream Codes'}. O tipo da playlist e a fonte (URL/Arquivo) não podem ser alterados.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -424,7 +425,7 @@ export function PlaylistManager() {
                   id="edit-playlist-name"
                   value={editPlaylistName}
                   onChange={(e) => setEditPlaylistName(e.target.value)}
-                  placeholder={editingPlaylist.type === 'xc' ? (editingPlaylist.xcDns || 'Minha Lista XC') : 'Minha Lista M3U'}
+                  placeholder={editingPlaylist.type === 'xc' ? (editingPlaylist.xcDns || 'Minha Lista XC') : (editingPlaylist.url || `Arquivo ${editingPlaylist.name || 'M3U'}`)}
                 />
               </div>
 
@@ -442,7 +443,7 @@ export function PlaylistManager() {
               )}
                {editingPlaylist.type === 'm3u' && editingPlaylist.source === 'file' && (
                 <p className="text-sm text-muted-foreground">
-                    Para alterar o conteúdo de uma playlist baseada em arquivo, por favor, remova-a e adicione o novo arquivo.
+                    O conteúdo de playlists baseadas em arquivo não pode ser alterado aqui. Para atualizar, remova esta lista e adicione o novo arquivo.
                 </p>
               )}
 
@@ -482,13 +483,45 @@ export function PlaylistManager() {
                 </div>
               )}
             </div>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline">Cancelar</Button>
-              </DialogClose>
-              <Button onClick={handleSaveChanges} disabled={isLoading || (editingPlaylist.type === 'm3u' && editingPlaylist.source === 'file' && !editPlaylistName.trim())}>
-                {isLoading ? 'Salvando...' : 'Salvar Alterações'}
-              </Button>
+            <DialogFooter className="sm:justify-between">
+              <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" className="mt-2 sm:mt-0">
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Apagar Playlist
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta ação não pode ser desfeita. Isso removerá permanentemente a playlist
+                       "{editingPlaylist.name || (editingPlaylist.type === 'm3u' ? (editingPlaylist.url || 'Playlist M3U') : editingPlaylist.xcDns)}"
+                       e todos os seus itens associados do StreamVerse.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => handleRemovePlaylist(editingPlaylist.id)}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      Sim, apagar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <div className="flex space-x-2">
+                <DialogClose asChild>
+                  <Button variant="outline">Cancelar</Button>
+                </DialogClose>
+                <Button 
+                  onClick={handleSaveChanges} 
+                  disabled={isLoading || (editingPlaylist.type === 'm3u' && editingPlaylist.source === 'file' && !editPlaylistName.trim() && !editingPlaylist.name ) }
+                >
+                  {isLoading ? 'Salvando...' : 'Salvar Alterações'}
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -496,3 +529,4 @@ export function PlaylistManager() {
     </>
   );
 }
+
