@@ -506,7 +506,7 @@ const SidebarMenuItem = React.forwardRef<
   <li
     ref={ref}
     data-sidebar="menu-item"
-    className={cn("group/menu-item relative list-none", className)} // Added list-none here
+    className={cn("group/menu-item relative list-none", className)}
     {...props}
   />
 ))
@@ -651,10 +651,12 @@ const SidebarMenuSkeleton = React.forwardRef<
     showIcon?: boolean
   }
 >(({ className, showIcon = false, ...props }, ref) => {
-  // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
+  const [dynamicWidth, setDynamicWidth] = React.useState<string>("75%"); // Default width for SSR and initial client render
+
+  React.useEffect(() => {
+    // This effect runs only on the client after mount
+    setDynamicWidth(`${Math.floor(Math.random() * 40) + 50}%`);
+  }, []); // Empty dependency array ensures this runs once on mount
 
   return (
     <div
@@ -674,7 +676,7 @@ const SidebarMenuSkeleton = React.forwardRef<
         data-sidebar="menu-skeleton-text"
         style={
           {
-            "--skeleton-width": width,
+            "--skeleton-width": dynamicWidth,
           } as React.CSSProperties
         }
       />
@@ -691,7 +693,7 @@ const SidebarMenuSub = React.forwardRef<
     ref={ref}
     data-sidebar="menu-sub"
     className={cn(
-      "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5 list-none p-0", // Added list-none p-0 here
+      "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5 list-none p-0", 
       "group-data-[collapsible=icon]:hidden",
       className
     )}
@@ -706,7 +708,7 @@ const SidebarMenuSubItem = React.forwardRef<
 >(({ className, ...props }, ref) => (
  <li
     ref={ref}
-    className={cn("list-none", className)} // Added list-none here
+    className={cn("list-none", className)} 
     {...props}
   />
 ))
