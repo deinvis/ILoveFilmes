@@ -38,7 +38,6 @@ const mainCategoryNavItems: NavItemConfig[] = [
   { value: 'channels', href: '/app/channels', label: 'Canais', icon: Tv2, mediaType: 'channel' },
   { value: 'movies', href: '/app/movies', label: 'Filmes', icon: Film, mediaType: 'movie' },
   { value: 'series', href: '/app/series', label: 'Séries', icon: Clapperboard, mediaType: 'series' },
-  // Removed Animes
 ];
 
 const staticNavItems: NavItemConfig[] = [
@@ -74,7 +73,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: [],
       movie: [],
       series: [],
-      // anime: [], // Removed anime
     };
     if (!mediaItems || mediaItems.length === 0) return subs;
 
@@ -84,12 +82,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       channel: new Set(),
       movie: new Set(),
       series: new Set(),
-      // anime: new Set(), // Removed anime
     };
 
     filteredMediaItemsForSidebar.forEach(item => {
-      if (item.type && uniqueNormalizedGroups[item.type]) { // Check if item.type is a valid key
+      if (item.type && uniqueNormalizedGroups[item.type]) { 
         const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
+        // Pass item.type to processGroupName
         const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup, item.type);
 
 
@@ -149,7 +147,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   isActive={isMainActive}
                   className={cn(
                     "w-full",
-                    hasSubItems ? "justify-between" : "justify-start" 
+                    !hasSubItems ? "justify-start" : "justify-between"
                   )}
                   onClick={() => { 
                     if (hasSubItems) {
