@@ -2,12 +2,11 @@
 import type { MediaItem, MediaType } from '@/types';
 import { extractChannelInfo } from '@/lib/channel-name-utils';
 
-const MAX_ITEMS_PER_PLAYLIST = 5000; // Reverted to 5000 as per earlier user request, adjust if needed
+const MAX_ITEMS_PER_PLAYLIST = 5000;
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.mpeg', '.mpg'];
 
 // Keywords for URL-based categorization (highest priority)
 const URL_STREAM_IS_CHANNEL_EXT = ['.ts'];
-// Removed anime specific URL keywords
 const URL_SERIES_KEYWORDS = ['/series/'];
 const URL_MOVIE_KEYWORDS = ['/movies/', '/movie/'];
 
@@ -16,13 +15,13 @@ const TITLE_PPV_KEYWORDS = ['ppv'];
 
 // Keywords for group-title based categorization (third priority)
 const GROUP_MOVIE_KEYWORDS = ['movie', 'movies', 'filme', 'filmes', 'pelicula', 'peliculas', 'vod', 'filmes dublados', 'filmes legendados', 'lançamentos'];
-const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados'];
+const GROUP_SERIES_KEYWORDS = ['series', 'serie', 'série', 'séries', 'tvshow', 'tvshows', 'programa de tv', 'seriados', 'anime', 'animes'];
 const GROUP_CHANNEL_KEYWORDS = ['canais', 'tv ao vivo', 'live tv', 'iptv channels', 'canal', 'esportes', 'noticias', 'infantil', 'documentarios', 'adulto'];
 
 // Keywords for title-based VOD categorization (fourth priority, if stream is VOD)
 const TITLE_SERIES_PATTERN = /S\d{1,2}E\d{1,2}|Season\s*\d+\s*Episode\s*\d+|Temporada\s*\d+\s*Epis[oó]dio\s*\d+/i;
 const TITLE_MOVIE_KEYWORDS_GENERAL = ['movie', 'film', 'pelicula'];
-const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow'];
+const TITLE_SERIES_KEYWORDS_GENERAL = ['series', 'serie', 'série', 'tvshow', 'anime', 'animes'];
 
 // General keywords for title-based categorization (fifth priority)
 const GENERAL_TITLE_CHANNEL_KEYWORDS = ['live', 'tv', 'channel', 'canal', 'ao vivo'];
@@ -111,7 +110,7 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
           originatingPlaylistName: itemOriginatingPlaylistName
         } = currentRawItem;
 
-        const fullTitle = currentRawItem.title;
+        const fullTitle = currentRawItem.title; // This is usually tvg-name
         const { baseName, qualityTag } = extractChannelInfo(fullTitle);
 
         const itemIndexInFile = items.length;
@@ -123,7 +122,7 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         const lowerStreamUrl = streamUrl.toLowerCase();
         const lowerFullTitle = fullTitle.toLowerCase();
         const lowerGroupTitle = (grouptitle || '').toLowerCase();
-        // const lowerTvGenre = (tvggenre || '').toLowerCase(); // Not used in anime removal
+        const lowerTvgGenre = (tvggenre || '').toLowerCase();
 
         const isVODStreamByExtension = VOD_EXTENSIONS.some(ext => lowerStreamUrl.endsWith(ext));
 
@@ -139,10 +138,9 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         } else if (GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
           mediaType = 'channel';
         } else {
-          // No anime detection here anymore
-          if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+          if (GROUP_SERIES_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
             mediaType = 'series';
-          } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword))) {
+          } else if (GROUP_MOVIE_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword) || lowerTvgGenre.includes(keyword))) {
             mediaType = 'movie';
           } else if (isVODStreamByExtension) {
             if (TITLE_SERIES_PATTERN.test(fullTitle) || TITLE_SERIES_KEYWORDS_GENERAL.some(keyword => lowerFullTitle.includes(keyword))) {
@@ -162,7 +160,7 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
         }
 
         let finalGenre: string | undefined = undefined;
-        if (mediaType === 'movie' || mediaType === 'series') { // Removed anime
+        if (mediaType === 'movie' || mediaType === 'series') {
             if (tvggenre && tvggenre.trim() !== '') {
                 finalGenre = tvggenre.trim();
             } else if (grouptitle && grouptitle.trim() !== '' && !GROUP_CHANNEL_KEYWORDS.some(keyword => lowerGroupTitle.includes(keyword)) ) {
@@ -170,6 +168,8 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
             }
         }
 
+        // Mutable groupTitle to allow overrides
+        let finalGroupTitle = grouptitle;
 
         const mediaItem: MediaItem = {
           id: itemId,
@@ -179,13 +179,30 @@ export function parseM3UContent(m3uString: string, playlistId: string, playlistN
           qualityTag: qualityTag,
           posterUrl: posterUrl,
           streamUrl: streamUrl,
-          groupTitle: grouptitle,
+          groupTitle: finalGroupTitle, // Initial group title
           tvgId: tvgId,
           genre: finalGenre,
           description: currentRawItem.description || `Título: ${fullTitle}. Grupo: ${grouptitle || 'N/A'}. Tipo: ${mediaType}. Qualidade: ${qualityTag || 'N/A'}.`,
           originatingPlaylistId: itemOriginatingPlaylistId,
           originatingPlaylistName: itemOriginatingPlaylistName,
         };
+        
+        // Override for Globo 4K/UHD channels
+        if (mediaItem.type === 'channel') {
+            const upperBaseName = mediaItem.baseName?.toUpperCase();
+            const upperQualityTag = mediaItem.qualityTag?.toUpperCase();
+            const upperTitle = mediaItem.title.toUpperCase();
+
+            if (upperBaseName && (upperBaseName.startsWith("GLOBO ") || upperBaseName === "GLOBO")) {
+                if ( (upperQualityTag && (upperQualityTag.includes("4K") || upperQualityTag.includes("UHD"))) ||
+                     upperTitle.includes("4K") || upperTitle.includes("UHD") )
+                {
+                    console.log(`Overriding group for ${mediaItem.title} from '${mediaItem.groupTitle}' to 'GLOBO'`);
+                    mediaItem.groupTitle = "GLOBO"; // This will be processed by processGroupName later
+                }
+            }
+        }
+
         items.push(mediaItem);
         currentRawItem = {};
       }
