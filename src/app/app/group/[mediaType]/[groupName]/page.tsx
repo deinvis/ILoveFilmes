@@ -12,10 +12,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Tv2, Film, Clapperboard, ListFilter, Search, XCircle } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { applyParentalFilter } from '@/lib/parental-filter';
 import { processGroupName } from '@/lib/group-name-utils';
 
 const ITEMS_PER_PAGE = 20;
+type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
 const MEDIA_TYPE_ICONS: Record<MediaType, React.ElementType> = {
   channel: Tv2,
@@ -45,6 +48,7 @@ export default function GroupPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [progressValue, setProgressValue] = useState(10);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('default');
 
   const {
     mediaItems: allMediaItemsFromStore,
@@ -86,7 +90,6 @@ export default function GroupPage() {
     if (mediaType !== 'channel') return new Map<string, MediaItem[]>();
     const map = new Map<string, MediaItem[]>();
     rawGroupItems.forEach(channel => {
-        // Normalize key to uppercase for consistent grouping
         const key = (channel.baseName || channel.title).toUpperCase();
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(channel);
@@ -101,11 +104,24 @@ export default function GroupPage() {
   }, [rawGroupItems, mediaType]);
 
   const logicalGroupItems = useMemo(() => {
+    let itemsToSort;
     if (mediaType === 'channel') {
-        return Array.from(logicalChannelVariantsMap.values()).map(variants => variants[0]).filter(Boolean) as MediaItem[];
+        itemsToSort = Array.from(logicalChannelVariantsMap.values()).map(variants => variants[0]).filter(Boolean) as MediaItem[];
+    } else {
+        itemsToSort = [...rawGroupItems]; // Create a new array for sorting
     }
-    return rawGroupItems;
-  }, [rawGroupItems, mediaType, logicalChannelVariantsMap]);
+
+    switch (sortOrder) {
+      case 'title-asc':
+        itemsToSort.sort((a, b) => (a.baseName || a.title).localeCompare(b.baseName || b.title));
+        break;
+      case 'title-desc':
+        itemsToSort.sort((a, b) => (b.baseName || b.title).localeCompare(a.baseName || a.title));
+        break;
+      // Default: no specific sort here, relies on original order or can be playlist order
+    }
+    return itemsToSort;
+  }, [rawGroupItems, mediaType, logicalChannelVariantsMap, sortOrder]);
 
 
   useEffect(() => {
@@ -173,10 +189,25 @@ export default function GroupPage() {
         <Skeleton className="h-10 w-40 mb-2" />
         <Skeleton className="h-12 w-3/4 mb-4" />
         {isClient && (storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0 && logicalGroupItems.length > 0)) && <Progress value={progressValue} className="w-full my-4 h-2" />}
-         <div className="relative sm:w-1/2 md:w-1/3 mb-6">
-            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-            <Input type="search" placeholder="Search in this group..." className="w-full pl-10" disabled />
-        </div>
+         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto mb-6">
+            <div className="relative flex-grow sm:w-64 md:w-80">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+              <Input type="search" placeholder="Buscar neste grupo..." className="w-full pl-10" disabled />
+            </div>
+            <div className="flex items-center gap-2 sm:w-auto">
+              <Label htmlFor="sort-group-items" className="text-sm hidden sm:block">Ordenar por:</Label>
+              <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)} disabled>
+                <SelectTrigger id="sort-group-items" className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Padrão</SelectItem>
+                  <SelectItem value="title-asc">Título (A-Z)</SelectItem>
+                  <SelectItem value="title-desc">Título (Z-A)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
           {Array.from({ length: ITEMS_PER_PAGE }).map((_, index) => (
             <div key={index} className="flex flex-col space-y-3">
@@ -245,18 +276,33 @@ export default function GroupPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center capitalize">
           <PageIcon className="mr-3 h-8 w-8 text-primary" />
-          {pageDisplayGroupName} ({mediaType === 'channel' ? 'Canais' : mediaType === 'movie' ? 'Filmes' : 'Séries'})
+          {pageDisplayGroupName} ({filteredLogicalGroupItems.length})
         </h1>
          {logicalGroupItems.length > 0 && (
-            <div className="relative sm:w-1/2 md:w-1/3">
-                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                type="search"
-                placeholder={`Buscar em ${pageDisplayGroupName}...`}
-                className="w-full pl-10"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                />
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <div className="relative flex-grow sm:w-64 md:w-80">
+                    <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                    type="search"
+                    placeholder={`Buscar em ${pageDisplayGroupName}...`}
+                    className="w-full pl-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                <div className="flex items-center gap-2 sm:w-auto">
+                  <Label htmlFor="sort-group-items" className="text-sm hidden sm:block">Ordenar por:</Label>
+                  <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
+                    <SelectTrigger id="sort-group-items" className="w-full sm:w-[180px]">
+                      <SelectValue placeholder="Ordenar por" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Padrão</SelectItem>
+                      <SelectItem value="title-asc">Título (A-Z)</SelectItem>
+                      <SelectItem value="title-desc">Título (Z-A)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
             </div>
         )}
       </div>
@@ -274,7 +320,6 @@ export default function GroupPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-8">
         {currentItemsToDisplay.map(representativeItem => {
-          // Normalize key to uppercase when retrieving from map for channels
           const allVariantsForThisChannel = mediaType === 'channel' 
             ? logicalChannelVariantsMap.get((representativeItem.baseName || representativeItem.title).toUpperCase()) 
             : undefined;
@@ -320,3 +365,4 @@ export default function GroupPage() {
     </div>
   );
 }
+
