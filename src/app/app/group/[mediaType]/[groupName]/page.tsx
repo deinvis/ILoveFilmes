@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Tv2, Film, Clapperboard, ListFilter, Search, XCircle } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -44,7 +45,8 @@ export default function GroupPage() {
     fetchAndParsePlaylists,
     epgData,
     epgLoading,
-    fetchAndParseEpg 
+    fetchAndParseEpg,
+    parentalControlEnabled
   } = usePlaylistStore();
   
   const rawMediaType = Array.isArray(params.mediaType) ? params.mediaType[0] : params.mediaType;
@@ -53,14 +55,15 @@ export default function GroupPage() {
   const mediaType = rawMediaType as MediaType;
   const groupName = useMemo(() => rawGroupName ? decodeURIComponent(rawGroupName) : 'Unknown Group', [rawGroupName]);
 
-  // Define groupItems *before* useEffects that depend on it
   const groupItems = useMemo(() => {
     if (!mediaType || !groupName) return [];
-    return mediaItems.filter(item => {
+    let items = mediaItems.filter(item => {
       const itemGroup = item.groupTitle || (item.type === 'movie' || item.type === 'series' ? item.genre : undefined) || 'Uncategorized';
       return item.type === mediaType && itemGroup === groupName;
     });
-  }, [mediaItems, mediaType, groupName]);
+    items = applyParentalFilter(items, parentalControlEnabled);
+    return items;
+  }, [mediaItems, mediaType, groupName, parentalControlEnabled]);
 
   useEffect(() => {
     setIsClient(true);
@@ -80,7 +83,6 @@ export default function GroupPage() {
     let interval: NodeJS.Timeout | undefined;
     const combinedLoading = storeIsLoading || (mediaType === 'channel' && epgLoading && Object.keys(epgData).length === 0);
 
-    // Now groupItems is guaranteed to be initialized here
     if (combinedLoading && groupItems.length === 0) {
       setProgressValue(10);
       interval = setInterval(() => {
@@ -183,7 +185,7 @@ export default function GroupPage() {
         <PageIcon className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">No Items in "{groupName}"</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          There are no {mediaType}s listed under the group "{groupName}".
+          There are no {mediaType}s listed under the group "{groupName}". This might be due to parental control settings.
         </p>
         <Button onClick={() => router.push(backPath)} size="lg" variant="outline">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to all {mediaType}s
@@ -265,7 +267,7 @@ export default function GroupPage() {
        {groupItems.length > 0 && filteredGroupItems.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <PageIcon className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-           <p className="text-xl text-muted-foreground">No {mediaType}s to display in "{groupName}" with current filters.</p>
+           <p className="text-xl text-muted-foreground">No {mediaType}s to display in "{groupName}" with current filters or search term.</p>
          </div>
        )}
     </div>

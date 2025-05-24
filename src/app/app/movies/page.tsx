@@ -12,13 +12,21 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 const ITEMS_PER_GROUP_PREVIEW = 4; 
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
 
 export default function MoviesPage() {
   const [isClient, setIsClient] = useState(false);
-  const { playlists, mediaItems, isLoading, error, fetchAndParsePlaylists } = usePlaylistStore();
+  const { 
+    playlists, 
+    mediaItems, 
+    isLoading, 
+    error, 
+    fetchAndParsePlaylists,
+    parentalControlEnabled 
+  } = usePlaylistStore();
   const [progressValue, setProgressValue] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -68,6 +76,7 @@ export default function MoviesPage() {
 
   const allMovies = useMemo(() => {
     let movies = mediaItems.filter(item => item.type === 'movie');
+    movies = applyParentalFilter(movies, parentalControlEnabled);
     switch (sortOrder) {
       case 'title-asc':
         movies = [...movies].sort((a, b) => a.title.localeCompare(b.title));
@@ -77,7 +86,7 @@ export default function MoviesPage() {
         break;
     }
     return movies;
-  }, [mediaItems, sortOrder]);
+  }, [mediaItems, sortOrder, parentalControlEnabled]);
 
   const filteredMovies = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -158,7 +167,7 @@ export default function MoviesPage() {
         <Film className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">No Movies Found</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          It seems there are no movies in your current playlists. Try adding a playlist that includes movies.
+          It seems there are no movies in your current playlists, or they are hidden by parental controls. Try adding a playlist that includes movies or check parental control settings.
         </p>
         <Link href="/app/settings" passHref>
           <Button size="lg" variant="outline">Go to Settings</Button>
@@ -234,9 +243,10 @@ export default function MoviesPage() {
       {allMovies.length > 0 && filteredMovies.length === 0 && !debouncedSearchTerm && !isLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <Film className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-           <p className="text-xl text-muted-foreground">No movies to display with current filters.</p>
+           <p className="text-xl text-muted-foreground">No movies to display with current filters or search term.</p>
          </div>
        )}
     </div>
   );
 }
+

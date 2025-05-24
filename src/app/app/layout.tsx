@@ -13,7 +13,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarInset,
+  // SidebarInset, // No longer used directly here, AppLayout is the inset
   SidebarMenuSkeleton, 
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,8 @@ import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'; 
 import React, { useMemo, useState, useEffect } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
-import type { MediaType } from '@/types';
+import type { MediaItem, MediaType } from '@/types';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 interface NavItemConfig {
   value: string; 
@@ -45,7 +46,6 @@ const staticNavItems: NavItemConfig[] = [
   { value: 'settings', href: '/app/settings', label: 'Configurações', icon: SettingsIcon, isStatic: true },
 ];
 
-// ClientSideOnlyRenderer component
 const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?: React.ReactNode }> = ({ children, placeholder }) => {
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -65,7 +65,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
   const pathname = usePathname();
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
   
-  const { mediaItems } = usePlaylistStore();
+  const { mediaItems, parentalControlEnabled } = usePlaylistStore();
 
   const subcategories = useMemo(() => {
     const subs: Record<MediaType, { href: string; label: string }[]> = {
@@ -75,13 +75,15 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
     };
     if (!mediaItems || mediaItems.length === 0) return subs;
 
+    const filteredMediaItemsForSidebar = applyParentalFilter(mediaItems, parentalControlEnabled);
+
     const uniqueGroups: Record<string, Set<string>> = { 
       channel: new Set(),
       movie: new Set(),
       series: new Set(),
     };
 
-    mediaItems.forEach(item => {
+    filteredMediaItemsForSidebar.forEach(item => {
       if (item.type && uniqueGroups[item.type]) {
         const group = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
         if (group && !uniqueGroups[item.type].has(group)) { 
@@ -96,7 +98,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
 
     Object.values(subs).forEach(list => list.sort((a, b) => a.label.localeCompare(b.label)));
     return subs;
-  }, [mediaItems]);
+  }, [mediaItems, parentalControlEnabled]);
   
   useEffect(() => {
     const currentMainCategory = mainCategoryNavItems.find(item => item.mediaType && pathname.startsWith(`/app/group/${item.mediaType}/`));
@@ -142,9 +144,8 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                   if (hasSubItems) {
                     toggleSubmenu(item.value);
                   }
-                  if (!hasSubItems) { 
-                    handleMainItemClick();
-                  }
+                  // If not hasSubItems, the click is handled by the Link itself if asChild is true
+                  // If hasSubItems, this click only toggles. The Link's click handler will navigate.
                 }}
                 tooltip={item.label}
                 asChild={!hasSubItems} 
@@ -153,7 +154,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                   <Link
                     href={item.href}
                     passHref 
-                    legacyBehavior={false}
+                    legacyBehavior={false} // Important for asChild with modern Next.js Link
                     onClick={handleMainItemClick} 
                     className="flex items-center flex-grow" 
                   >
@@ -164,6 +165,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                   <>
                     <Link
                       href={item.href}
+                      passHref
                       legacyBehavior={false} 
                       className="flex items-center flex-grow" 
                       onClick={handleMainItemClick} 
@@ -178,6 +180,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                       )}
                       onClick={(e) => { 
                           e.stopPropagation(); 
+                          e.preventDefault(); // Prevent Link navigation if only toggling
                           toggleSubmenu(item.value); 
                       }}
                     />
@@ -197,6 +200,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
                           onClick={handleLinkClickAndCloseSheet}
                           tooltip={subItem.label}
                         >
+                          {/* No icon for sub-items by default, add if needed */}
                           <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
                         </SidebarMenuButton>
                       </Link>
@@ -253,7 +257,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <PlaySquare className="h-8 w-8 text-primary" />
               </Link>
           </SidebarHeader>
-          <SidebarContent className="p-2">
+          <SidebarContent className="p-2"> {/* Removed flex-grow from here */}
             <ClientSideOnlyRenderer placeholder={navLinksPlaceholder}>
               <NavLinks closeMobileSheet={() => setIsMobileSheetOpen(false)} />
             </ClientSideOnlyRenderer>
@@ -265,7 +269,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </SidebarFooter>
         </Sidebar>
-        <SidebarInset className="flex-1 flex flex-col overflow-hidden">
+        
+        {/* Main content area */}
+        <div className="flex-1 flex flex-col overflow-hidden"> {/* This acts as SidebarInset */}
           <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background px-6 md:hidden">
             <Sheet open={isMobileSheetOpen} onOpenChange={setIsMobileSheetOpen}>
               <SheetTrigger asChild>
@@ -299,8 +305,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <main className="flex-1 overflow-y-auto p-6 bg-background">
             {children}
           </main>
-        </SidebarInset>
+        </div>
       </div>
     </SidebarProvider>
   );
 }
+

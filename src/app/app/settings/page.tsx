@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Palette, ListPlus, CalendarDays, Save, Home, Heart, History, Trash2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,7 +43,9 @@ export default function SettingsPage() {
     epgError,
     preferredStartPage,
     setPreferredStartPage,
-    resetAppState // Get the new action
+    parentalControlEnabled,
+    setParentalControlEnabled,
+    resetAppState
   } = usePlaylistStore();
   
   const [currentEpgUrl, setCurrentEpgUrl] = useState(epgUrl || '');
@@ -85,14 +88,20 @@ export default function SettingsPage() {
     });
   };
 
+  const handleParentalControlToggle = (enabled: boolean) => {
+    setParentalControlEnabled(enabled);
+    toast({
+      title: "Controle Parental Atualizado",
+      description: `Filtro de conteúdo adulto ${enabled ? 'ativado' : 'desativado'}. As listas serão atualizadas.`,
+    });
+  };
+
   const handleResetData = () => {
     resetAppState();
     toast({
       title: "Dados do Aplicativo Redefinidos",
       description: "Todas as suas configurações, playlists e histórico foram limpos. Pode ser necessário recarregar a página.",
     });
-    // Optional: force reload for a clean slate immediately
-    // setTimeout(() => window.location.reload(), 1000);
   };
 
   return (
@@ -135,9 +144,34 @@ export default function SettingsPage() {
       <Separator />
 
       <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center text-xl"><ShieldCheck className="mr-3 h-6 w-6 text-primary" /> Controle Parental</CardTitle>
+          <CardDescription>Gerencie a visibilidade de conteúdo adulto.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="parental-control-switch"
+              checked={parentalControlEnabled}
+              onCheckedChange={handleParentalControlToggle}
+              aria-label="Ativar ou desativar filtro de conteúdo adulto"
+            />
+            <Label htmlFor="parental-control-switch">
+              {parentalControlEnabled ? 'Filtro de Conteúdo Adulto Ativado' : 'Filtro de Conteúdo Adulto Desativado'}
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Quando ativado, conteúdo com "XXX" ou "ADULTOS" no título ou grupo será ocultado.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card className="shadow-lg">
          <CardHeader>
           <CardTitle className="flex items-center text-xl"><ListPlus className="mr-3 h-6 w-6 text-primary" /> Configurações de Playlist</CardTitle>
-          <CardDescription>Gerencie suas fontes de playlist M3U.</CardDescription>
+          <CardDescription>Gerencie suas fontes de playlist M3U ou Xtream Codes.</CardDescription>
         </CardHeader>
         <CardContent>
           <PlaylistManager />
@@ -219,3 +253,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

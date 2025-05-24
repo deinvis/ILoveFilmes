@@ -9,7 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import type { MediaItem, EpgProgram } from '@/types'; // Added EpgProgram
+import type { MediaItem, EpgProgram } from '@/types';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 export default function FavoritesPage() {
   const [isClient, setIsClient] = useState(false);
@@ -19,9 +20,10 @@ export default function FavoritesPage() {
     error: storeError, 
     fetchAndParsePlaylists,
     favoriteItemIds,
-    epgData, // For EPG now playing info
-    epgLoading, // For EPG now playing info
-    fetchAndParseEpg // For EPG now playing info
+    epgData, 
+    epgLoading, 
+    fetchAndParseEpg,
+    parentalControlEnabled
   } = usePlaylistStore();
   
   const [progressValue, setProgressValue] = useState(10);
@@ -45,7 +47,6 @@ export default function FavoritesPage() {
     if (!isClient) return;
 
     let interval: NodeJS.Timeout | undefined;
-    // Consider both media items loading and EPG loading if EPG is used.
     const combinedLoading = storeIsLoading || (epgLoading && Object.keys(epgData).length === 0);
 
     if (combinedLoading && mediaItems.length === 0 && favoriteItemIds.length > 0) { 
@@ -77,8 +78,10 @@ export default function FavoritesPage() {
   }, [searchTerm]);
 
   const favoriteMediaItems = useMemo(() => {
-    return mediaItems.filter(item => favoriteItemIds.includes(item.id));
-  }, [mediaItems, favoriteItemIds]);
+    let items = mediaItems.filter(item => favoriteItemIds.includes(item.id));
+    items = applyParentalFilter(items, parentalControlEnabled);
+    return items;
+  }, [mediaItems, favoriteItemIds, parentalControlEnabled]);
 
   const filteredFavoriteItems = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -147,7 +150,7 @@ export default function FavoritesPage() {
         <Heart className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Favorites Not Found</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          Some of your favorited items could not be found in the current playlists. They might have been removed from the source.
+          Some of your favorited items could not be found in the current playlists or are hidden by parental controls. They might have been removed from the source or check parental control settings.
         </p>
       </div>
     );
@@ -198,3 +201,4 @@ export default function FavoritesPage() {
     </div>
   );
 }
+

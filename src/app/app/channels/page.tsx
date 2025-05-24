@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import type { MediaItem, EpgProgram } from '@/types';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 const ITEMS_PER_GROUP_PREVIEW = 4; 
 type SortOrder = 'default' | 'title-asc' | 'title-desc';
@@ -27,7 +28,8 @@ export default function ChannelsPage() {
     fetchAndParsePlaylists,
     epgData,
     epgLoading,
-    fetchAndParseEpg
+    fetchAndParseEpg,
+    parentalControlEnabled
   } = usePlaylistStore();
   
   const [progressValue, setProgressValue] = useState(10);
@@ -84,6 +86,7 @@ export default function ChannelsPage() {
 
   const allChannels = useMemo(() => {
     let channels = mediaItems.filter(item => item.type === 'channel');
+    channels = applyParentalFilter(channels, parentalControlEnabled);
     switch (sortOrder) {
       case 'title-asc':
         channels = [...channels].sort((a, b) => a.title.localeCompare(b.title));
@@ -91,10 +94,9 @@ export default function ChannelsPage() {
       case 'title-desc':
         channels = [...channels].sort((a, b) => b.title.localeCompare(a.title));
         break;
-      // 'default' case: no sorting, use original order from mediaItems
     }
     return channels;
-  }, [mediaItems, sortOrder]);
+  }, [mediaItems, sortOrder, parentalControlEnabled]);
 
   const filteredChannels = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -180,7 +182,7 @@ export default function ChannelsPage() {
         <Tv2 className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">No Channels Found</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          It seems there are no TV channels in your current playlists. You might want to check your playlist sources or add one that includes channels.
+          It seems there are no TV channels in your current playlists, or they are hidden by parental controls. You might want to check your playlist sources or parental control settings.
         </p>
         <Link href="/app/settings" passHref>
           <Button size="lg" variant="outline">Go to Settings</Button>
@@ -263,9 +265,10 @@ export default function ChannelsPage() {
        {allChannels.length > 0 && filteredChannels.length === 0 && !debouncedSearchTerm && !storeIsLoading && (
          <div className="text-center py-16 bg-card rounded-lg shadow-md">
            <Tv2 className="w-16 h-16 text-muted-foreground mx-auto mb-6" />
-           <p className="text-xl text-muted-foreground">No channels to display with current filters.</p>
+           <p className="text-xl text-muted-foreground">No channels to display with current filters or search term.</p>
          </div>
        )}
     </div>
   );
 }
+

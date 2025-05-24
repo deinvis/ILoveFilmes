@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import type { MediaItem, EpgProgram, RecentlyPlayedItem } from '@/types';
+import { applyParentalFilter } from '@/lib/parental-filter';
 
 export default function RecentlyPlayedPage() {
   const [isClient, setIsClient] = useState(false);
@@ -21,7 +22,8 @@ export default function RecentlyPlayedPage() {
     recentlyPlayed,
     epgData,
     epgLoading,
-    fetchAndParseEpg
+    fetchAndParseEpg,
+    parentalControlEnabled
   } = usePlaylistStore();
   
   const [progressValue, setProgressValue] = useState(10);
@@ -34,9 +36,9 @@ export default function RecentlyPlayedPage() {
   
   useEffect(() => {
     if (isClient) {
-      fetchAndParsePlaylists(); // Ensure media items are loaded
+      fetchAndParsePlaylists(); 
       if (usePlaylistStore.getState().epgUrl) { 
-        fetchAndParseEpg(); // Ensure EPG data is loaded for channels
+        fetchAndParseEpg(); 
       }
     }
   }, [fetchAndParsePlaylists, fetchAndParseEpg, isClient]);
@@ -77,13 +79,13 @@ export default function RecentlyPlayedPage() {
 
   const recentMediaItems = useMemo(() => {
     if (mediaItems.length === 0) return [];
-    // Sort recentlyPlayed by timestamp descending (newest first)
     const sortedRecent = [...recentlyPlayed].sort((a, b) => b.timestamp - a.timestamp);
-    // Map to actual media items
-    return sortedRecent
+    let items = sortedRecent
       .map(recent => mediaItems.find(item => item.id === recent.itemId))
-      .filter((item): item is MediaItem => !!item); // Filter out undefined if item not found
-  }, [mediaItems, recentlyPlayed]);
+      .filter((item): item is MediaItem => !!item); 
+    items = applyParentalFilter(items, parentalControlEnabled);
+    return items;
+  }, [mediaItems, recentlyPlayed, parentalControlEnabled]);
 
   const filteredRecentItems = useMemo(() => {
     if (!debouncedSearchTerm) {
@@ -152,7 +154,7 @@ export default function RecentlyPlayedPage() {
         <History className="w-24 h-24 text-muted-foreground mb-6" />
         <h2 className="text-3xl font-semibold mb-3">Itens Recentes Não Encontrados</h2>
         <p className="text-muted-foreground text-lg mb-8 max-w-md">
-          Alguns dos seus itens reproduzidos recentemente não puderam ser encontrados nas playlists atuais. Eles podem ter sido removidos da fonte.
+          Alguns dos seus itens reproduzidos recentemente não puderam ser encontrados nas playlists atuais ou estão ocultos pelo controle parental. Verifique as configurações do controle parental.
         </p>
       </div>
     );
@@ -203,3 +205,4 @@ export default function RecentlyPlayedPage() {
     </div>
   );
 }
+
