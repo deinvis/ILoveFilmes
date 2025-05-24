@@ -21,6 +21,8 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   const logMediaError = useCallback((context: string, error: MediaError | null, streamUrl?: string) => {
     let userFriendlyMessage = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
+    // Use console.warn for MEDIA_ERR_SRC_NOT_SUPPORTED (code 4)
+    // to make it less prominent in Next.js error overlay for common format issues.
     const consoleLogFn = error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ? console.warn : console.error;
 
     if (error) {
@@ -60,10 +62,16 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
   const tryPlay = useCallback((element: HTMLVideoElement, sourceDescription: string) => {
     console.log(`VideoPlayer: Tentando reproduzir: ${sourceDescription} para URL: ${element.src || item.streamUrl}`);
-    element.play().catch(error => {
-      console.warn(`VideoPlayer: Autoplay/play foi impedido para ${sourceDescription} (URL: ${element.src || item.streamUrl}):`, error.name, error.message);
-      // Não definir playerError aqui, pois o usuário pode clicar no play. Apenas logar.
-    });
+    element.play()
+      .then(() => {
+        console.log(`VideoPlayer: Play promise resolvido para ${sourceDescription} (URL: ${element.src || item.streamUrl})`);
+        setPlayerError(null); // Clear previous errors on successful play start
+      })
+      .catch(error => {
+        console.warn(`VideoPlayer: Play promise rejeitado para ${sourceDescription} (URL: ${element.src || item.streamUrl}):`, error.name, error.message);
+        // Do not set playerError here for autoplay block, user can still click play.
+        // But if it's a general error after explicit play, it might be set by the 'error' event listener.
+      });
   }, [item.streamUrl]);
 
   const handleTimeUpdate = useCallback(() => {
@@ -81,7 +89,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
       setPlayerError(null); 
       if (item.type === 'movie' || item.type === 'series') {
         const savedProgress = getPlaybackProgress(item.id);
-        if (savedProgress && videoElement.duration > 0 && videoElement.currentTime < savedProgress.currentTime && savedProgress.currentTime < videoElement.duration -1) { 
+        if (savedProgress && videoElement.duration > 0 && videoElement.currentTime < savedProgress.currentTime && savedProgress.currentTime < videoElement.duration -1 ) { 
           console.log(`VideoPlayer (${playerType}): Retomando VOD item "${item.title}" de ${savedProgress.currentTime}s`);
           videoElement.currentTime = savedProgress.currentTime;
         }
@@ -106,27 +114,28 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         videoElement.removeEventListener('timeupdate', handleTimeUpdate);
       }
     };
-  }, [item, tryPlay, logMediaError, getPlaybackProgress, handleTimeUpdate, setPlayerError]);
+  }, [item, tryPlay, logMediaError, getPlaybackProgress, handleTimeUpdate]);
 
 
   useEffect(() => {
     console.log(`VideoPlayer: Carregando item: "${item.title}", URL: "${item.streamUrl}", ID: ${item.id}`);
-    setPlayerError(null); 
+    setPlayerError(null);
 
     const videoElement = videoRef.current;
     if (!videoElement) return;
 
     let cleanupVideoEvents: (() => void) | undefined;
 
-    // Limpeza da instância HLS anterior e do src do vídeo
+    // Destroy previous HLS instance if it exists
     if (hlsRef.current) {
       console.log("VideoPlayer: Destruindo instância HLS anterior para o novo item:", item.title);
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+    // Reset video element before loading new source
     videoElement.pause();
-    videoElement.removeAttribute('src'); 
-    videoElement.load(); // Reseta o player interno do navegador
+    videoElement.removeAttribute('src');
+    videoElement.load(); // Resets the media element to its initial state
 
     const lowerStreamUrl = item.streamUrl.toLowerCase();
     const isHlsStream = lowerStreamUrl.includes('.m3u8') || 
@@ -134,8 +143,9 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
                         lowerStreamUrl.includes('.isml/manifest');
 
     if (isHlsStream) {
+      console.log(`VideoPlayer: Configurando player HLS para stream: "${item.streamUrl}"`);
       if (Hls.isSupported()) {
-        console.log("VideoPlayer: HLS.js é suportado. Configurando player HLS para:", item.streamUrl);
+        console.log("VideoPlayer: HLS.js é suportado.");
         const hls = new Hls();
         hlsRef.current = hls;
         hls.loadSource(item.streamUrl);
@@ -145,7 +155,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("VideoPlayer HLS.js: Manifesto parseado para", item.streamUrl);
-          setPlayerError(null); 
           tryPlay(videoElement, `HLS stream (manifest parsed event): ${item.streamUrl}`);
         });
 
@@ -188,13 +197,13 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         console.warn("VideoPlayer: HLS.js não é suportado e HLS nativo não está disponível. A reprodução pode falhar:", item.streamUrl);
         setPlayerError(unsupportedMessage);
         videoElement.src = item.streamUrl; 
-        cleanupVideoEvents = setupVideoEventListeners(videoElement, 'HLS'); // Tentativa, mas provável falha
+        cleanupVideoEvents = setupVideoEventListeners(videoElement, 'HLS');
       }
     } else {
       console.log(`VideoPlayer: Configurando player HTML5 padrão para stream não-HLS: "${item.streamUrl}" (Item: "${item.title}")`);
       videoElement.src = item.streamUrl;
       cleanupVideoEvents = setupVideoEventListeners(videoElement, 'Default');
-      // A tentativa de play para default player é feita dentro de onLoadedMetadata
+      // tryPlay for default player is handled by onLoadedMetadata
     }
 
     return () => {
@@ -223,7 +232,7 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
         className="w-full h-full"
         playsInline 
         poster={item.posterUrl}
-        preload="auto"
+        preload="auto" // Changed from metadata as "auto" might behave better with direct play attempts
       >
         Seu navegador não suporta a tag de vídeo ou o formato do vídeo.
       </video>
@@ -233,7 +242,6 @@ export function VideoPlayer({ item }: VideoPlayerProps) {
             <AlertTriangle className="h-5 w-5" />
             <AlertTitle>Erro ao Reproduzir</AlertTitle>
             <AlertDescription>{playerError}</AlertDescription>
-            {/* <Button onClick={() => { /* Adicionar lógica de tentar novamente se desejado */ /* setPlayerError(null); tryLoadVideo(); }} className="mt-2">Tentar Novamente</Button> */}
           </Alert>
         </div>
       )}
