@@ -15,30 +15,37 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { applyParentalFilter } from '@/lib/parental-filter';
+import { processGroupName } from '@/lib/group-name-utils';
 
 interface MediaCardProps {
   item: MediaItem;
-  nowPlaying?: string; 
+  nowPlaying?: string;
 }
 
 // Helper to find other MediaItem instances that represent the same logical content
-const getLogicalSources = (currentItem: MediaItem, allItems: MediaItem[]): MediaItem[] => {
+const getLogicalSources = (currentItem: MediaItem, allItems: MediaItem[], parentalControlEnabled: boolean): MediaItem[] => {
   if (!currentItem) return [];
-  
-  // If tvgId exists, it's the primary way to identify the same channel/VOD across playlists
+
+  // When counting sources, consider only items that would be visible based on parental controls
+  const visibleItems = applyParentalFilter(allItems, parentalControlEnabled);
+
+  let potentialSources: MediaItem[];
   if (currentItem.tvgId) {
-    return allItems.filter(
+    potentialSources = visibleItems.filter(
       (item) => item.tvgId === currentItem.tvgId && item.type === currentItem.type
     );
+  } else {
+    // For VOD or items without tvgId, group by normalized title and type
+    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title, currentItem.type);
+    potentialSources = visibleItems.filter(
+      (item) => {
+        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title, item.type);
+        return otherItemTitleNormalizedKey === currentItemTitleNormalizedKey && item.type === currentItem.type;
+      }
+    );
   }
-  // Fallback for VOD or items without tvgId: match by normalized title and type
-  // This is less reliable due to title variations but better than nothing.
-  const normalizedCurrentTitle = currentItem.title.toLowerCase().trim();
-  return allItems.filter(
-    (item) =>
-      item.title.toLowerCase().trim() === normalizedCurrentTitle &&
-      item.type === currentItem.type
-  );
+  return potentialSources;
 };
 
 
@@ -49,11 +56,12 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
 
   const posterUrl = imageError || !item.posterUrl ? placeholderBaseUrl : item.posterUrl;
 
-  const { 
-    toggleFavorite, 
-    isFavorite, 
+  const {
+    toggleFavorite,
+    isFavorite,
     getPlaybackProgress,
-    mediaItems: allMediaItems // Get all media items from the store
+    mediaItems: allMediaItems,
+    parentalControlEnabled
   } = usePlaylistStore();
 
   const isItemFavorite = isFavorite(item.id);
@@ -69,13 +77,13 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
     }
   }
 
-  const logicalSources = useMemo(() => getLogicalSources(item, allMediaItems), [item, allMediaItems]);
+  const logicalSources = useMemo(() => getLogicalSources(item, allMediaItems, parentalControlEnabled), [item, allMediaItems, parentalControlEnabled]);
   const hasMultipleSources = logicalSources.length > 1;
 
-  const playButtonText = isWatched 
-    ? 'Assistir Novamente' 
-    : (item.type === 'movie' || item.type === 'series') && playbackProgressData && progressPercentage > 0 && progressPercentage < 95 
-    ? 'Continuar' 
+  const playButtonText = isWatched
+    ? 'Assistir Novamente'
+    : (item.type === 'movie' || item.type === 'series') && playbackProgressData && progressPercentage > 0 && progressPercentage < 95
+    ? 'Continuar'
     : 'Play';
 
   return (
@@ -91,7 +99,7 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
             className="object-cover w-full h-full"
             onError={() => setImageError(true)}
             data-ai-hint={dataAiHint}
-            priority={false} 
+            priority={false}
           />
         </Link>
         {isWatched && (item.type === 'movie' || item.type === 'series') && (
@@ -107,7 +115,7 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
             size="icon"
             className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white hover:text-red-400 rounded-full"
             onClick={(e) => {
-              e.preventDefault(); 
+              e.preventDefault();
               e.stopPropagation();
               toggleFavorite(item.id);
             }}
@@ -120,19 +128,19 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
         <CardTitle className="text-lg font-semibold leading-tight mb-1 truncate" title={item.title}>
           {item.title}
         </CardTitle>
-        
+
         {(item.type === 'movie' || item.type === 'series') && item.genre && (
           <p className="text-xs text-muted-foreground truncate" title={item.genre}>
             {item.genre}
           </p>
         )}
 
-        {item.originatingPlaylistName && (
+        {!hasMultipleSources && item.originatingPlaylistName && (
            <p className="text-xs text-muted-foreground/80 truncate mt-0.5" title={`From: ${item.originatingPlaylistName}`}>
             Fonte: {item.originatingPlaylistName}
           </p>
         )}
-        
+
         {item.type === 'channel' && item.groupTitle && (
            <p className="text-xs text-muted-foreground truncate" title={item.groupTitle}>{item.groupTitle}</p>
         )}
@@ -140,7 +148,7 @@ export function MediaCard({ item, nowPlaying }: MediaCardProps) {
         {nowPlaying && item.type === 'channel' && (
           <p className="text-xs text-primary truncate mt-1" title={nowPlaying}>Now: {nowPlaying}</p>
         )}
-        
+
         {(item.type === 'movie' || item.type === 'series') && playbackProgressData && !isWatched && progressPercentage > 0 && (
           <Progress value={progressPercentage} className="h-1.5 w-full mt-2" />
         )}
