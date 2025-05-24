@@ -18,8 +18,7 @@ const SIMPLE_QUALITY_TAGS: string[] = [
   'FHD', 'UHD', '4K', // Specific resolutions/standards
   'HD', 'SD',         // Common qualities
   'HEVC', 'H265',     // Common codecs
-  'JDD',              // Added based on user example "ESPN JDD"
-                       // Add other common single-word/code tags here, e.g., 'HDR', 'DV'
+                       // JDD removed as it was a typo
 ];
 
 // Combine and sort all tags: longest first to ensure more specific matches take precedence.
@@ -113,4 +112,3 @@ export function extractChannelInfo(title: string): ExtractedChannelInfo {
 
   return { baseName: currentTitle.trim(), qualityTag: extractedQualityTag };
 }
-
