@@ -32,10 +32,10 @@ const hasMultipleLogicalSources = (currentItem: MediaItem, allItems: MediaItem[]
     );
   } else {
     // For VOD, group by normalized title and type
-    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title);
+    const { normalizedKey: currentItemTitleNormalizedKey } = processGroupName(currentItem.title, currentItem.type);
     potentialSources = visibleItems.filter(
       (item) => {
-        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title);
+        const { normalizedKey: otherItemTitleNormalizedKey } = processGroupName(item.title, item.type);
         return otherItemTitleNormalizedKey === currentItemTitleNormalizedKey && item.type === currentItem.type;
       }
     );
@@ -74,7 +74,7 @@ export default function MoviesPage() {
 
     let interval: NodeJS.Timeout | undefined;
 
-    if (isClient && storeIsLoading) {
+    if (storeIsLoading) { // Show progress if any loading is happening
         setProgressValue(prev => (prev === 100 ? 10 : prev));
         interval = setInterval(() => {
         setProgressValue((prev) => (prev >= 90 ? 10 : prev + 15));
@@ -133,7 +133,7 @@ export default function MoviesPage() {
     const groupsMap: Record<string, { displayName: string; items: MediaItem[] }> = {};
     filteredMovies.forEach(movie => {
       const rawGroupName = movie.groupTitle || movie.genre || 'Uncategorized';
-      const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName);
+      const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroupName, 'movie');
       
       if (!groupsMap[normalizedKey]) {
         groupsMap[normalizedKey] = { displayName: processedDisplayName, items: [] };
@@ -147,13 +147,13 @@ export default function MoviesPage() {
   }, [filteredMovies]);
 
 
-  if (!isClient || (storeIsLoading && allMovies.length === 0 && playlists.length > 0)) {
+  if (!isClient || (storeIsLoading && allMovies.length === 0 && playlists.length > 0 && !debouncedSearchTerm)) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <h1 className="text-3xl font-bold flex items-center"><Film className="mr-3 h-8 w-8 text-primary" /> Filmes</h1>
         </div>
-        {isClient && storeIsLoading && <Progress value={progressValue} className="w-full mb-8 h-2" />}
+        <Progress value={progressValue} className="w-full mb-8 h-2" />
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mt-4">
           {Array.from({ length: 10 }).map((_, index) => (
              <div key={index} className="flex flex-col space-y-3">
@@ -197,7 +197,7 @@ export default function MoviesPage() {
     );
   }
 
-  if (mediaItems.length > 0 && allMovies.length === 0 && !storeIsLoading) {
+  if (mediaItems.length > 0 && allMovies.length === 0 && !storeIsLoading && !debouncedSearchTerm) {
      return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8 rounded-lg bg-card shadow-lg">
         <Film className="w-24 h-24 text-muted-foreground mb-6" />
@@ -210,6 +210,7 @@ export default function MoviesPage() {
             <Button size="lg" variant="outline">Ir para Configurações</Button>
             </Link>
             {showOnlyMultiSource && <Button size="lg" onClick={() => setShowOnlyMultiSource(false)}>Mostrar todos os filmes</Button>}
+            {parentalControlEnabled && <Button size="lg" onClick={() => usePlaylistStore.getState().setParentalControlEnabled(false)}>Desativar Controle Parental</Button>}
         </div>
       </div>
     );
@@ -219,7 +220,7 @@ export default function MoviesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center"><Film className="mr-3 h-8 w-8 text-primary" /> Filmes</h1>
-        {!storeIsLoading && (playlists.length > 0 || allMovies.length > 0) && (
+        {(playlists.length > 0 || allMovies.length > 0) && (
            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
              <div className="relative flex-grow sm:w-64 md:w-80">
               <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
@@ -248,7 +249,7 @@ export default function MoviesPage() {
         )}
       </div>
 
-      {mediaItems.length > 0 && !storeIsLoading && (
+      {(mediaItems.length > 0 || debouncedSearchTerm) && (
          <div className="flex items-center space-x-2 mt-0 mb-4">
             <Switch
                 id="multi-source-filter-movies"

@@ -2,23 +2,23 @@
 /**
  * @fileOverview Utility functions for processing and normalizing group names.
  */
+import type { MediaType } from '@/types';
 
 interface ProcessedGroupName {
   displayName: string; // Name suitable for display and URL segments
   normalizedKey: string; // Name suitable for internal grouping logic (lowercase, trimmed, diacritics removed, canonicalized)
 }
 
-// Patterns to match prefixes like "MOVIES | ", "CHANNELS - ", "SERIES : ", etc.
-const MEDIA_TYPE_PREFIX_PATTERNS: RegExp[] = [
-  /^(?:filmes?|movies?|s[eé]ries|tvshows?|canais|channels|vod|live|iptv|adulto(?:s)?|kids|infantil|esportes|noticias|document[aá]rios|uhd|fhd|sd|hd|4k|24h|24\/7|desenhos?)\s*[|:\-–—]\s*/i,
-];
-
 const DEFAULT_GROUP_NAME = 'Uncategorized';
 const CANONICAL_LANCAMENTOS_DISPLAY_NAME = "Lançamentos";
-const CANONICAL_LANCAMENTOS_NORMALIZED_KEY = removeDiacritics(CANONICAL_LANCAMENTOS_DISPLAY_NAME.toLowerCase());
 const CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME = "Ficção e Fantasia";
-const CANONICAL_FICCAO_FANTASIA_NORMALIZED_KEY = removeDiacritics(CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME.toLowerCase().replace(/\s*e\s*/, ' ')); // "ficcao fantasia"
 
+// Patterns to match prefixes like "MOVIES | ", "CHANNELS - ", "SERIES : ", etc.
+// These are very generic and might be applied before type-specific logic if needed,
+// or incorporated into type-specific logic.
+const GENERIC_MEDIA_TYPE_PREFIX_PATTERNS: RegExp[] = [
+  /^(?:filmes?|movies?|s[eé]ries|tvshows?|canais|channels|vod|live|iptv|adulto(?:s)?|kids|infantil|esportes|noticias|document[aá]rios|uhd|fhd|sd|hd|4k|24h|24\/7|desenhos?|todos\s*os\s*g[êe]neros)\s*[|:\-–—]\s*/i,
+];
 
 /**
  * Removes diacritics (accents) from a string.
@@ -31,7 +31,7 @@ function removeDiacritics(str: string): string {
 
 /**
  * Converts a string to a "smart" title case.
- * Keeps all-caps words (like "DC", "4K") as they are.
+ * Keeps all-caps words (like "DC", "4K", "AÇÃO") as they are.
  * Capitalizes the first letter of other words/parts of words.
  * @param str The input string.
  * @returns The string in smart title case.
@@ -41,10 +41,15 @@ function smartTitleCase(str: string): string {
   return str
     .split(' ')
     .map(word => {
-      if (word.length > 1 && word === word.toUpperCase()) return word; // Keep existing all-caps words like "DC", "AÇÃO"
+      if (word.length > 1 && word === word.toUpperCase() && !/\d/.test(word) && word.length <= 5) { // Keep existing all-caps words like "AÇÃO", "DC", but not very long ones
+        return word;
+      }
       // Handle words with slashes like "ANIMACAO/INFANTIL" -> "Animacao/Infantil"
       return word.split('/').map(part => {
         if (!part) return '';
+        if (part.length > 1 && part === part.toUpperCase() && !/\d/.test(part) && part.length <= 5) {
+            return part;
+        }
         return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
       }).join('/');
     })
@@ -52,82 +57,96 @@ function smartTitleCase(str: string): string {
 }
 
 
-export function processGroupName(rawName?: string): ProcessedGroupName {
+export function processGroupName(rawName?: string, mediaType?: MediaType): ProcessedGroupName {
   if (!rawName || rawName.trim() === '') {
-    return { 
-      displayName: DEFAULT_GROUP_NAME, 
-      normalizedKey: removeDiacritics(DEFAULT_GROUP_NAME.toLowerCase()) 
+    return {
+      displayName: DEFAULT_GROUP_NAME,
+      normalizedKey: removeDiacritics(DEFAULT_GROUP_NAME.toLowerCase())
     };
   }
 
-  let nameAfterPrefixStrip = rawName.trim();
-  const originalFormBeforeSmartCase = nameAfterPrefixStrip; // Keep original form for all-caps check
+  let currentName = rawName.trim();
+  let baseNameForProcessing = currentName; // This will be the name after initial, general prefix stripping
 
-  for (const pattern of MEDIA_TYPE_PREFIX_PATTERNS) {
-    const match = nameAfterPrefixStrip.match(pattern);
-    if (match && match[0]) {
-      const potentialDisplayName = nameAfterPrefixStrip.substring(match[0].length).trim();
-      if (potentialDisplayName.length > 0) {
-        nameAfterPrefixStrip = potentialDisplayName;
-        break;
-      }
+  // Try a general prefix strip first, useful for mixed content like "ALL | SERIES | ACTION"
+  for (const pattern of GENERIC_MEDIA_TYPE_PREFIX_PATTERNS) {
+    const tempName = baseNameForProcessing.replace(pattern, '').trim();
+    if (tempName.length > 0 && tempName.length < baseNameForProcessing.length) {
+      baseNameForProcessing = tempName;
+      // If a generic prefix was stripped, re-evaluate if the type-specific one still matches
+      currentName = baseNameForProcessing;
+      break; 
+    }
+  }
+  
+  // Type-specific structuring for displayName
+  if (mediaType === 'movie' || mediaType === 'series') {
+    // For movies/series, remove common prefixes like "FILMES | ", "SÉRIES - "
+    const typeSpecificPrefixPattern = /^(?:filmes?|movies?|s[eé]ries|tvshows?|vod)\s*[|:\-–—]\s*/i;
+    const coreName = currentName.replace(typeSpecificPrefixPattern, '').trim();
+    if (coreName.length > 0) {
+      currentName = coreName;
+    }
+  } else if (mediaType === 'channel') {
+    // For channels, replace "|" with space.
+    currentName = currentName.replace(/\s*\|\s*/g, ' ').trim();
+    // If "canal(is)" is not in the name, prepend "Canais ".
+    const channelKeywords = ['canal', 'canais'];
+    const containsChannelKeyword = channelKeywords.some(kw => removeDiacritics(currentName.toLowerCase()).includes(kw));
+    if (!containsChannelKeyword) {
+      currentName = `Canais ${currentName}`;
     }
   }
 
-  if (nameAfterPrefixStrip === '') {
-    nameAfterPrefixStrip = DEFAULT_GROUP_NAME;
-  }
-  
-  // Determine normalized key for rule checking first
-  const normalizedKeyForRules = removeDiacritics(nameAfterPrefixStrip.toLowerCase()).trim();
-  let finalNormalizedKey = normalizedKeyForRules;
-  let finalDisplayName = nameAfterPrefixStrip; // Base display name on this
-
-  // Canonicalization Rules (these set both displayName and can affect finalNormalizedKey)
-  const lancamentoKeywords = ["lancamento", "estreia"];
-  const cinemaKeywords = ["cinema"];
-  let isLancamentoOrCinema = false;
-  lancamentoKeywords.forEach(keyword => { if (normalizedKeyForRules.includes(keyword)) isLancamentoOrCinema = true; });
-  if (!isLancamentoOrCinema && cinemaKeywords.some(kw => normalizedKeyForRules.includes(kw) && normalizedKeyForRules.split(' ').includes(kw))) {
-    isLancamentoOrCinema = true;
+  // If after prefix stripping, the name is empty, default to Uncategorized
+  if (currentName.trim() === '') {
+    currentName = DEFAULT_GROUP_NAME;
   }
 
-  if (isLancamentoOrCinema) {
-    finalDisplayName = CANONICAL_LANCAMENTOS_DISPLAY_NAME; // "Lançamentos"
-    finalNormalizedKey = CANONICAL_LANCAMENTOS_NORMALIZED_KEY;
+  // Canonicalization rules (Lançamentos, Ficção e Fantasia)
+  let displayName = currentName;
+  const normalizedForCanonicalCheck = removeDiacritics(currentName.toLowerCase()).trim();
+
+  const lancamentoKeywords = ["lancamento", "estreia", "cinema"];
+  if (lancamentoKeywords.some(kw => normalizedForCanonicalCheck.includes(kw))) {
+    displayName = CANONICAL_LANCAMENTOS_DISPLAY_NAME;
   } else {
-    const ficcaoFantasiaPatterns = [/^ficcao\s*[e&]\s*fantasia$/, /^ficcao\/fantasia$/, /^fantasia\s*[e&]\s*ficcao$/, /^fantasia\/ficcao$/];
-    let isFiccaoFantasia = false;
-    for (const pattern of ficcaoFantasiaPatterns) {
-      if (pattern.test(normalizedKeyForRules)) {
-        isFiccaoFantasia = true;
-        break;
-      }
+    const ficcaoFantasiaPatterns = [/^ficcao\s*e\s*fantasia$/, /^ficcao\/fantasia$/, /^fantasia\s*e\s*ficcao$/, /^fantasia\/ficcao$/];
+    if (ficcaoFantasiaPatterns.some(p => p.test(normalizedForCanonicalCheck))) {
+      displayName = CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME;
     }
-    if (isFiccaoFantasia) {
-      finalDisplayName = CANONICAL_FICCAO_FANTASIA_DISPLAY_NAME; // "Ficção e Fantasia"
-      finalNormalizedKey = CANONICAL_FICCAO_FANTASIA_NORMALIZED_KEY;
-    } else {
-      // Default casing rule: if original (after prefix strip) was all caps, keep it. Else, Smart Title Case.
-      // Check against the form *before* any smartTitleCase was applied.
-      if (nameAfterPrefixStrip === originalFormBeforeSmartCase && nameAfterPrefixStrip === nameAfterPrefixStrip.toUpperCase() && nameAfterPrefixStrip !== DEFAULT_GROUP_NAME.toUpperCase()) {
-         finalDisplayName = nameAfterPrefixStrip; // Keep original ALL CAPS
-      } else {
-         finalDisplayName = smartTitleCase(nameAfterPrefixStrip);
-      }
-    }
-  }
-  
-  // Ensure default is handled if somehow empty
-  if (finalDisplayName.trim() === '' || finalDisplayName === smartTitleCase(DEFAULT_GROUP_NAME).trim()) {
-      finalDisplayName = DEFAULT_GROUP_NAME; // "Uncategorized"
-  }
-  if (finalNormalizedKey.trim() === '') { // Should use the key derived from rules or initial normalization
-      finalNormalizedKey = removeDiacritics(DEFAULT_GROUP_NAME.toLowerCase());
   }
 
-  return { 
-    displayName: finalDisplayName, 
-    normalizedKey: finalNormalizedKey 
+  // Apply Smart Title Case unless it was canonicalized or was originally ALL CAPS
+  // and is not a channel name that had "Canais " prepended.
+  if (displayName === currentName) { // Only apply if not canonicalized
+    // Check if the 'baseNameForProcessing' (name after GENERIC prefix strip) was all caps
+    // And if the currentName (after type-specific strip) is essentially that base name
+    const originalSegment = baseNameForProcessing;
+    const currentSegment = currentName;
+
+    if (originalSegment === originalSegment.toUpperCase() &&
+        originalSegment.length > 1 &&
+        !/\d/.test(originalSegment) && // ignore "4K" like things for this rule if they become just numbers
+        originalSegment.length <= 15 && // Heuristic: very long all caps strings are probably not intentional titles
+        displayName === currentSegment) { // Make sure we're applying to the non-canonicalized name
+      displayName = originalSegment; // Preserve original all caps
+    } else {
+      displayName = smartTitleCase(displayName);
+    }
+  } else {
+    // If it was canonicalized, it already has the desired capitalization.
+  }
+
+
+  if (displayName.trim() === '' || displayName === smartTitleCase(DEFAULT_GROUP_NAME) || displayName === DEFAULT_GROUP_NAME.toLowerCase()) {
+      displayName = DEFAULT_GROUP_NAME;
+  }
+
+  const normalizedKey = removeDiacritics(displayName.toLowerCase()).trim();
+
+  return {
+    displayName: displayName,
+    normalizedKey: normalizedKey
   };
 }

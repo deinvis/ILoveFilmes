@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader as MobileSheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'; // Added SheetTrigger
 import React, { useMemo, useState, useEffect } from 'react';
 import { usePlaylistStore } from '@/store/playlistStore';
 import type { MediaItem, MediaType } from '@/types';
@@ -61,7 +61,8 @@ const ClientSideOnlyRenderer: React.FC<{ children: React.ReactNode, placeholder?
 };
 
 
-const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, closeMobileSheet?: () => void }) => {
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = React.useState(false);
   const pathname = usePathname();
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({});
 
@@ -86,7 +87,7 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
     filteredMediaItemsForSidebar.forEach(item => {
       if (item.type && uniqueNormalizedGroups[item.type]) {
         const rawGroup = item.groupTitle || (item.type !== 'channel' ? item.genre : undefined) || 'Uncategorized';
-        const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup);
+        const { displayName: processedDisplayName, normalizedKey } = processGroupName(rawGroup, item.type);
 
         if (processedDisplayName && processedDisplayName !== 'Uncategorized' && !uniqueNormalizedGroups[item.type].has(normalizedKey)) {
           uniqueNormalizedGroups[item.type].add(normalizedKey);
@@ -108,131 +109,130 @@ const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, 
       setOpenSubmenus(prev => ({ ...prev, [currentMainCategory.value]: true }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname]); // Only run on pathname change, openSubmenus is self-managed
+
 
   const toggleSubmenu = (itemValue: string) => {
     setOpenSubmenus(prev => ({ ...prev, [itemValue]: !prev[itemValue] }));
   };
 
-  const handleLinkClickAndCloseSheet = () => {
-    if (isMobile && closeMobileSheet) {
-      closeMobileSheet();
+  const NavLinks = ({ isMobile = false, closeMobileSheet }: { isMobile?: boolean, closeMobileSheet?: () => void }) => {
+    const handleLinkClickAndCloseSheet = () => {
+      if (isMobile && closeMobileSheet) {
+        closeMobileSheet();
+      }
     }
-  }
 
-  return (
-    <>
-      {mainCategoryNavItems.map((item) => {
-        const categorySubItems = item.mediaType ? subcategories[item.mediaType] : [];
-        const hasSubItems = categorySubItems.length > 0;
-        const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
+    return (
+      <>
+        {mainCategoryNavItems.map((item) => {
+          const categorySubItems = item.mediaType ? subcategories[item.mediaType] : [];
+          const hasSubItems = categorySubItems.length > 0;
+          const isMainActive = pathname === item.href || (item.mediaType ? pathname.startsWith(`/app/group/${item.mediaType}/`) : false);
 
-        const handleMainItemClick = () => {
-          if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
-            handleLinkClickAndCloseSheet();
-          }
-        };
+          const handleMainItemClick = () => {
+            if (!hasSubItems || (openSubmenus[item.value] && pathname === item.href)) {
+              handleLinkClickAndCloseSheet();
+            }
+          };
 
-        return (
-          <React.Fragment key={item.value}>
-            <SidebarMenuItem>
-               <SidebarMenuButton
-                isActive={isMainActive}
-                className={cn(
-                  "w-full",
-                  hasSubItems ? "justify-between" : "justify-start"
-                )}
-                onClick={() => {
-                  if (hasSubItems) {
-                    toggleSubmenu(item.value);
-                  }
-                }}
-                tooltip={item.label}
-                asChild={!hasSubItems}
-              >
-                {!hasSubItems ? (
-                  <Link
-                    href={item.href}
-                    passHref
-                    legacyBehavior={false}
-                    onClick={handleMainItemClick}
-                    className="flex items-center flex-grow"
-                  >
-                    <item.icon className="h-5 w-5 mr-2 shrink-0" />
-                    <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
-                  </Link>
-                ) : (
-                  <>
+          return (
+            <React.Fragment key={item.value}>
+              <SidebarMenuItem>
+                 <SidebarMenuButton
+                  isActive={isMainActive}
+                  className={cn(
+                    "w-full",
+                    hasSubItems ? "justify-between" : "justify-start"
+                  )}
+                  onClick={() => { // Simplified onClick
+                    if (hasSubItems) {
+                      toggleSubmenu(item.value);
+                    }
+                  }}
+                  tooltip={item.label}
+                  asChild={!hasSubItems} 
+                >
+                  {!hasSubItems ? (
                     <Link
                       href={item.href}
                       passHref
-                      legacyBehavior={false}
-                      className="flex items-center flex-grow"
+                      legacyBehavior={false} // Important for asChild with modern Link
                       onClick={handleMainItemClick}
+                      className="flex items-center flex-grow" // Ensure link takes full space
                     >
                       <item.icon className="h-5 w-5 mr-2 shrink-0" />
                       <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                     </Link>
-                    <ChevronDown
-                      className={cn(
-                        "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
-                        openSubmenus[item.value] ? "rotate-180" : ""
-                      )}
-                      onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          toggleSubmenu(item.value);
-                      }}
-                    />
-                  </>
-                )}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            {openSubmenus[item.value] && hasSubItems && (
-              <div className="pl-5 pb-1 pt-0 group-data-[collapsible=icon]:hidden">
-                <SidebarMenu>
-                  {categorySubItems.map(subItem => (
-                    <SidebarMenuItem key={subItem.href}>
-                      <Link href={subItem.href} passHref legacyBehavior={false} className="w-full">
-                        <SidebarMenuButton
-                          isActive={pathname === subItem.href}
-                          className="w-full justify-start h-auto py-1.5 text-xs font-normal"
-                          onClick={handleLinkClickAndCloseSheet}
-                          tooltip={subItem.label}
-                        >
-                          <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
-                        </SidebarMenuButton>
+                  ) : (
+                    <>
+                      <Link
+                        href={item.href}
+                        passHref
+                        legacyBehavior={false}
+                        className="flex items-center flex-grow"
+                        onClick={handleMainItemClick}
+                      >
+                        <item.icon className="h-5 w-5 mr-2 shrink-0" />
+                        <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
                       </Link>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </div>
-            )}
-          </React.Fragment>
-        );
-      })}
-      {staticNavItems.map((item) => (
-         <SidebarMenuItem key={item.href}>
-          <Link href={item.href} passHref legacyBehavior={false} className="w-full">
-            <SidebarMenuButton
-              isActive={pathname === item.href}
-              className="w-full justify-start"
-              onClick={handleLinkClickAndCloseSheet}
-              tooltip={item.label}
-            >
-              <item.icon className="h-5 w-5 mr-2 shrink-0" />
-              <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
-            </SidebarMenuButton>
-          </Link>
-        </SidebarMenuItem>
-      ))}
-    </>
-  );
-}
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform group-data-[collapsible=icon]:hidden shrink-0",
+                          openSubmenus[item.value] ? "rotate-180" : ""
+                        )}
+                        onClick={(e) => { // Ensure chevron click only toggles, doesn't navigate link
+                            e.stopPropagation();
+                            e.preventDefault();
+                            toggleSubmenu(item.value);
+                        }}
+                      />
+                    </>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {openSubmenus[item.value] && hasSubItems && (
+                <div className="pl-5 pb-1 pt-0 group-data-[collapsible=icon]:hidden">
+                  <SidebarMenu>
+                    {categorySubItems.map(subItem => (
+                      <SidebarMenuItem key={subItem.href}>
+                        <Link href={subItem.href} passHref legacyBehavior={false} className="w-full">
+                          <SidebarMenuButton
+                            isActive={pathname === subItem.href}
+                            className="w-full justify-start h-auto py-1.5 text-xs font-normal"
+                            onClick={handleLinkClickAndCloseSheet}
+                            tooltip={subItem.label}
+                          >
+                            <span className="group-data-[collapsible=icon]:hidden pl-3 truncate">{subItem.label}</span>
+                          </SidebarMenuButton>
+                        </Link>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+        {staticNavItems.map((item) => (
+           <SidebarMenuItem key={item.href}>
+            <Link href={item.href} passHref legacyBehavior={false} className="w-full">
+              <SidebarMenuButton
+                isActive={pathname === item.href}
+                className="w-full justify-start"
+                onClick={handleLinkClickAndCloseSheet}
+                tooltip={item.label}
+              >
+                <item.icon className="h-5 w-5 mr-2 shrink-0" />
+                <span className="group-data-[collapsible=icon]:hidden truncate">{item.label}</span>
+              </SidebarMenuButton>
+            </Link>
+          </SidebarMenuItem>
+        ))}
+      </>
+    );
+  }
 
-
-export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const [isMobileSheetOpen, setIsMobileSheetOpen] = React.useState(false);
 
   const navLinksPlaceholder = (
     <>
